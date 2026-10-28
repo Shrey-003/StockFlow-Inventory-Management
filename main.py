@@ -1,8 +1,9 @@
-﻿import logging
+import logging
 from collections.abc import Generator
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -24,6 +25,18 @@ app = FastAPI(
     title="StockFlow API",
     description="Inventory and Order Management Platform",
     version="0.1.0",
+)
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:4200",
+        "http://127.0.0.1:4200",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -317,6 +330,27 @@ def cancel_reservation(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Could not cancel the reservation.",
         ) from exc
+
+@app.get(
+    "/reservations",
+    response_model=list[ReservationRead],
+    tags=["Reservations"],
+)
+def list_reservations(
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> list[Reservation]:
+    return db.scalars(
+        select(Reservation)
+        .order_by(
+            Reservation.created_at.desc(),
+            Reservation.id.desc(),
+        )
+        .offset(skip)
+        .limit(limit)
+    ).all()
+
 
 @app.get(
     "/reservations/{reservation_id}",
