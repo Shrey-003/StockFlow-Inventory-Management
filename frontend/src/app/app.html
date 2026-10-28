@@ -1,0 +1,447 @@
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-logo">SF</div>
+      <div>
+        <strong>StockFlow</strong>
+        <small>INVENTORY CONTROL</small>
+      </div>
+    </div>
+
+    <div class="nav-label">WORKSPACE</div>
+    <div class="nav-item" [class.active]="currentView === 'overview'" role="button" tabindex="0" (click)="showOverview()" (keydown.enter)="showOverview()"><span aria-hidden="true">I</span> Inventory overview</div>
+    <div class="nav-item" [class.active]="currentView === 'products'" role="button" tabindex="0" (click)="showProducts()" (keydown.enter)="showProducts()"><span aria-hidden="true">P</span> Product catalog</div>
+    <div class="nav-item" [class.active]="currentView === 'reservations'" role="button" tabindex="0" (click)="showReservations()" (keydown.enter)="showReservations()"><span aria-hidden="true">R</span> Reservations</div>
+
+    <div class="sidebar-bottom">
+      <div class="connection">
+        <span class="connection-dot" [class.online]="apiConnected"></span>
+        <div>
+          <strong>Backend API</strong>
+          <small>{{ apiConnected ? 'Connected' : 'Unavailable' }}</small>
+        </div>
+      </div>
+      <small class="environment">LOCAL DEVELOPMENT</small>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div [hidden]="currentView === 'reservations'">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">WORKSPACE / OVERVIEW</div>
+        <h1>Inventory overview</h1>
+        <p>Monitor your product catalog and stock levels.</p>
+      </div>
+      <div class="top-actions">
+        <button class="btn secondary" type="button"
+          (click)="refresh()" [disabled]="loading">
+          ↻ Refresh
+        </button>
+        <button class="btn primary" type="button" (click)="openForm()">
+          + Add product
+        </button>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="alert success" *ngIf="successMessage" role="status">
+        {{ successMessage }}
+        <button type="button" (click)="successMessage = ''">×</button>
+      </div>
+
+      <div class="alert error" *ngIf="errorMessage && !showForm" role="alert">
+        {{ errorMessage }}
+        <button type="button" (click)="errorMessage = ''">×</button>
+      </div>
+
+      <section class="stats">
+        <article class="stat-card">
+          <div class="stat-heading">
+            <span>Total products</span><span class="stat-icon purple">▤</span>
+          </div>
+          <strong class="stat-number">{{ loading ? '—' : products.length }}</strong>
+          <small>Products in your catalog</small>
+        </article>
+
+        <article class="stat-card">
+          <div class="stat-heading">
+            <span>Total units</span><span class="stat-icon blue">▦</span>
+          </div>
+          <strong class="stat-number">{{ loading ? '—' : totalUnits }}</strong>
+          <small>Units currently available</small>
+        </article>
+
+        <article class="stat-card">
+          <div class="stat-heading">
+            <span>Low-stock products</span><span class="stat-icon amber">!</span>
+          </div>
+          <strong class="stat-number">{{ loading ? '—' : lowStockCount }}</strong>
+          <small>Five or fewer units remaining</small>
+        </article>
+
+        <article class="stat-card">
+          <div class="stat-heading">
+            <span>Inventory value</span><span class="stat-icon green">↗</span>
+          </div>
+          <strong class="stat-number money">
+            {{ loading ? '—' : (inventoryValue | number:'1.2-2') }}
+          </strong>
+          <small>Unit price multiplied by stock</small>
+        </article>
+      </section>
+
+      <section class="catalog">
+        <header class="catalog-header">
+          <div>
+            <h2>Product catalog</h2>
+            <p>Review products and available inventory.</p>
+          </div>
+          <span class="count">{{ filteredProducts.length }} items</span>
+        </header>
+
+        <div class="toolbar">
+          <label class="search">
+            <span>⌕</span>
+            <input
+              type="search"
+              [(ngModel)]="searchTerm"
+              placeholder="Search name, SKU, or description"
+              aria-label="Search products" />
+          </label>
+          <button class="btn secondary" type="button"
+            (click)="refresh()" [disabled]="loading">
+            Refresh data
+          </button>
+        </div>
+
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>PRODUCT</th>
+                <th>SKU</th>
+                <th class="right">UNIT PRICE</th>
+                <th class="right">STOCK</th>
+                <th>STATUS</th>
+                <th>LAST UPDATED</th>
+              <th>ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngIf="loading">
+                <td colspan="7" class="empty">Loading products...</td>
+              </tr>
+
+              <tr *ngIf="!loading && filteredProducts.length === 0">
+                <td colspan="6" class="empty">
+                  {{ searchTerm ? 'No products match your search.' : 'No products found.' }}
+                </td>
+              </tr>
+
+              <tr *ngFor="let product of filteredProducts">
+                <td>
+                  <div class="product">
+                    <div class="avatar">
+                      {{ product.name.substring(0, 1).toUpperCase() }}
+                    </div>
+                    <div>
+                      <strong>{{ product.name }}</strong>
+                      <small>ID {{ product.id }}</small>
+                    </div>
+                  </div>
+                </td>
+                <td><code>{{ product.sku }}</code></td>
+                <td class="right price">
+                  {{ product.price | number:'1.2-2' }}
+                </td>
+                <td class="right stock-number">{{ product.stock_quantity }}</td>
+                <td>
+                  <span class="pill" [ngClass]="stockClass(product)">
+                    <span class="pill-dot"></span>
+                    {{ stockStatus(product) }}
+                  </span>
+                </td>
+                <td class="date">
+                  {{ product.updated_at | date:'MMM d, y, h:mm a' }}
+                </td>
+                <td>
+                  <div class="row-actions">
+                    <button type="button" class="row-action" (click)="editProduct(product)" [attr.aria-label]="'Edit ' + product.name">Edit</button>
+                    <button type="button" class="row-action danger-action" (click)="deleteProduct(product)" [attr.aria-label]="'Delete ' + product.name">Delete</button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <footer class="catalog-footer">
+          <span>StockFlow inventory service</span>
+          <span>
+            <span class="connection-dot" [class.online]="apiConnected"></span>
+            {{ apiConnected ? 'Live API data' : 'API unavailable' }}
+          </span>
+        </footer>
+      </section>
+
+      <footer class="page-footer">
+        <span>StockFlow · Inventory management</span>
+        <span>Development environment</span>
+      </footer>
+    </div>
+    </div>
+
+    <section class="reservation-view" *ngIf="currentView === 'reservations'">
+      <header class="reservation-header">
+        <div>
+          <div class="eyebrow">WORKSPACE / INVENTORY</div>
+          <h1>Reservations</h1>
+          <p>Manage temporary inventory reservations and expiry.</p>
+        </div>
+        <div class="reservation-header-actions">
+          <button class="reservation-button" type="button"
+            (click)="refreshReservations()" [disabled]="reservationsLoading">
+            Refresh
+          </button>
+          <button class="reservation-button reservation-primary" type="button"
+            (click)="openReservationForm()" [disabled]="products.length === 0">
+            + New reservation
+          </button>
+        </div>
+      </header>
+
+      <div class="reservation-notice reservation-success"
+        *ngIf="reservationSuccess" role="status">
+        {{ reservationSuccess }}
+        <button type="button" (click)="reservationSuccess = ''"
+          aria-label="Dismiss success message">?</button>
+      </div>
+
+      <div class="reservation-notice reservation-error"
+        *ngIf="reservationError" role="alert">
+        {{ reservationError }}
+        <button type="button" (click)="reservationError = ''"
+          aria-label="Dismiss error message">?</button>
+      </div>
+
+      <section class="reservation-stats">
+        <article class="reservation-stat-card">
+          <span>Total reservations</span>
+          <strong>{{ reservations.length }}</strong>
+          <small>Records returned by the API</small>
+        </article>
+        <article class="reservation-stat-card">
+          <span>Active</span>
+          <strong>{{ activeReservationsCount }}</strong>
+          <small>Currently holding stock</small>
+        </article>
+        <article class="reservation-stat-card">
+          <span>Cancelled</span>
+          <strong>{{ cancelledReservationsCount }}</strong>
+          <small>Released manually</small>
+        </article>
+        <article class="reservation-stat-card">
+          <span>Expired</span>
+          <strong>{{ expiredReservationsCount }}</strong>
+          <small>Reservations past expiry</small>
+        </article>
+      </section>
+
+      <section class="reservation-form-card" *ngIf="showReservationForm">
+        <div class="reservation-section-heading">
+          <div>
+            <h2>Create reservation</h2>
+            <p>Stock availability is validated by the backend.</p>
+          </div>
+          <button class="reservation-button" type="button"
+            (click)="closeReservationForm()">Close</button>
+        </div>
+
+        <form (ngSubmit)="createReservation()">
+          <div class="reservation-form-grid">
+            <label>
+              Product
+              <select name="product_id"
+                [(ngModel)]="reservationForm.product_id" required>
+                <option [ngValue]="null" disabled>Select a product</option>
+                <option *ngFor="let product of products"
+                  [ngValue]="product.id"
+                  [disabled]="product.stock_quantity <= 0">
+                  {{ product.name }} ? {{ product.stock_quantity }} available
+                </option>
+              </select>
+            </label>
+
+            <label>
+              Quantity
+              <input type="number" name="quantity"
+                [(ngModel)]="reservationForm.quantity"
+                min="1" step="1" required />
+              <small *ngIf="selectedReservationProduct">
+                {{ selectedReservationProduct.stock_quantity }} units available
+              </small>
+            </label>
+
+            <label>
+              Reservation duration
+              <select name="ttl_minutes"
+                [(ngModel)]="reservationForm.ttl_minutes" required>
+                <option [ngValue]="5">5 minutes</option>
+                <option [ngValue]="15">15 minutes</option>
+                <option [ngValue]="30">30 minutes</option>
+                <option [ngValue]="60">60 minutes</option>
+                <option [ngValue]="120">120 minutes</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="reservation-form-actions">
+            <button class="reservation-button" type="button"
+              (click)="closeReservationForm()">Cancel</button>
+            <button class="reservation-button reservation-primary"
+              type="submit"
+              [disabled]="reservationSaving || products.length === 0">
+              {{ reservationSaving ? 'Creating...' : 'Create reservation' }}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section class="reservation-table-card">
+        <div class="reservation-section-heading">
+          <div>
+            <h2>Reservation history</h2>
+            <p>Review active, cancelled, and expired reservations.</p>
+          </div>
+          <span class="reservation-count">{{ reservations.length }} records</span>
+        </div>
+
+        <div class="reservation-loading" *ngIf="reservationsLoading">
+          Loading reservations?
+        </div>
+
+        <div class="reservation-table-wrap" *ngIf="!reservationsLoading">
+          <table class="reservation-table">
+            <thead>
+              <tr>
+                <th>RESERVATION</th>
+                <th>PRODUCT</th>
+                <th>QUANTITY</th>
+                <th>STATUS</th>
+                <th>CREATED</th>
+                <th>EXPIRES</th>
+                <th>ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let reservation of reservations">
+                <td class="reservation-id">#{{ reservation.id }}</td>
+                <td>
+                  <strong>{{ productNameForReservation(reservation) }}</strong>
+                  <small class="reservation-secondary">
+                    Product ID {{ reservation.product_id }}
+                  </small>
+                </td>
+                <td>{{ reservation.quantity }}</td>
+                <td>
+                  <span class="reservation-status"
+                    [ngClass]="reservationStatusClass(reservation.status)">
+                    {{ reservation.status }}
+                  </span>
+                </td>
+                <td>{{ reservation.created_at | date:'MMM d, y, h:mm a' }}</td>
+                <td>{{ reservation.expires_at | date:'MMM d, y, h:mm a' }}</td>
+                <td>
+                  <button *ngIf="reservation.status === 'active'"
+                    type="button"
+                    class="reservation-button reservation-cancel"
+                    (click)="cancelReservation(reservation)">Cancel</button>
+                  <span *ngIf="reservation.status !== 'active'"
+                    class="reservation-secondary">N/A</span>
+                </td>
+              </tr>
+              <tr *ngIf="reservations.length === 0">
+                <td colspan="7" class="reservation-empty">
+                  No reservations found.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <footer class="reservation-table-footer">
+          <span>StockFlow reservation service</span>
+          <span>{{ apiConnected ? 'Live API data' : 'Check API connection' }}</span>
+        </footer>
+      </section>
+    </section>
+  </main>
+</div>
+
+<div class="backdrop" *ngIf="showForm" (click)="closeForm()">
+  <section class="modal" role="dialog" aria-modal="true"
+    aria-labelledby="form-title" (click)="$event.stopPropagation()">
+
+    <header class="modal-header">
+      <div>
+        <div class="eyebrow">PRODUCT CATALOG</div>
+        <h2 id="form-title">{{ editingProductId === null ? 'Add a product' : 'Edit product' }}</h2>
+        <p>Enter the details of the inventory item.</p>
+      </div>
+      <button class="close" type="button" aria-label="Close"
+        (click)="closeForm()">×</button>
+    </header>
+
+    <form #productForm="ngForm" (ngSubmit)="saveProduct()">
+      <label class="field">
+        Product name <b>*</b>
+        <input name="name" [(ngModel)]="form.name"
+          required maxlength="120" placeholder="e.g. Wireless Mouse" />
+      </label>
+
+      <label class="field">
+        SKU <b>*</b>
+        <input name="sku" [(ngModel)]="form.sku"
+          required maxlength="64"
+          pattern="^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          placeholder="e.g. SF-MOUSE-001" />
+      </label>
+
+      <div class="form-row">
+        <label class="field">
+          Unit price <b>*</b>
+          <input type="number" name="price" [(ngModel)]="form.price"
+            required min="0" max="99999999.99" step="0.01" />
+        </label>
+
+        <label class="field">
+          Initial stock <b>*</b>
+          <input type="number" name="stock_quantity"
+            [(ngModel)]="form.stock_quantity"
+            required min="0" step="1" />
+        </label>
+      </div>
+
+      <label class="field">
+        Description
+        <textarea name="description" [(ngModel)]="form.description"
+          maxlength="2000" rows="3"
+          placeholder="Optional product description"></textarea>
+      </label>
+
+      <div class="form-error" *ngIf="errorMessage" role="alert">
+        {{ errorMessage }}
+      </div>
+
+      <footer class="modal-actions">
+        <button class="btn secondary" type="button"
+          (click)="closeForm()">Cancel</button>
+        <button class="btn primary" type="submit"
+          [disabled]="saving || productForm.invalid">
+          {{ saving ? (editingProductId === null ? 'Creating...' : 'Saving...') : (editingProductId === null ? 'Create product' : 'Save changes') }}
+        </button>
+      </footer>
+    </form>
+  </section>
+</div>
