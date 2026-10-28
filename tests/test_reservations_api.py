@@ -169,3 +169,60 @@ def test_expiration_restores_inventory(client, test_engine):
     assert detail_response.status_code == 200, detail_response.text
     assert detail_response.json()["status"] == "expired"
     assert get_stock(client, product["id"]) == 10
+
+def test_list_reservations_returns_newest_first(client):
+    product_response = client.post(
+        "/products",
+        json={
+            "name": "Reservation Listing Test",
+            "sku": "SF-TEST-LIST-001",
+            "price": "10.00",
+            "stock_quantity": 5,
+        },
+    )
+    assert product_response.status_code == 201, product_response.text
+    product_id = product_response.json()["id"]
+
+    created_ids = []
+
+    for _ in range(3):
+        response = create_reservation(client, product_id, quantity=1)
+        assert response.status_code == 201, response.text
+        created_ids.append(response.json()["id"])
+
+    response = client.get("/reservations")
+    assert response.status_code == 200, response.text
+
+    listed_ids = [item["id"] for item in response.json()]
+    assert listed_ids == list(reversed(created_ids))
+
+
+def test_list_reservations_supports_pagination(client):
+    product_response = client.post(
+        "/products",
+        json={
+            "name": "Reservation Pagination Test",
+            "sku": "SF-TEST-PAGE-001",
+            "price": "10.00",
+            "stock_quantity": 5,
+        },
+    )
+    assert product_response.status_code == 201, product_response.text
+    product_id = product_response.json()["id"]
+
+    created_ids = []
+
+    for _ in range(3):
+        response = create_reservation(client, product_id, quantity=1)
+        assert response.status_code == 201, response.text
+        created_ids.append(response.json()["id"])
+
+    response = client.get(
+        "/reservations",
+        params={"skip": 1, "limit": 1},
+    )
+    assert response.status_code == 200, response.text
+
+    listed = response.json()
+    assert len(listed) == 1
+    assert listed[0]["id"] == list(reversed(created_ids))[1]
