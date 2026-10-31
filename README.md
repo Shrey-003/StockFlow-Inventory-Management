@@ -1,104 +1,148 @@
-﻿# StockFlow
+# StockFlow
 
-StockFlow is a backend inventory management and reservation system built to demonstrate software engineering fundamentals, data integrity, and concurrent request handling.
+StockFlow is a full-stack inventory management and reservation application built to demonstrate reliable inventory operations, transactional data integrity, and concurrent request handling.
+
+The application consists of an Angular dashboard, a FastAPI backend, and a PostgreSQL database.
 
 ## Features
 
-- Product CRUD APIs backed by PostgreSQL
-- Unique SKU enforcement and input validation
-- Atomic inventory reservations
-- Reservation cancellation and stock restoration
-- Reservation expiry processing
-- Background expiry worker
-- Concurrent reservation test script
-- Automated validation tests
+### Inventory management
+- Create, read, update, and delete products
+- Unique SKU enforcement
+- Product input validation
+- Inventory quantity and value summaries
+- Low-stock indicators
+
+### Reservations
+- Reserve inventory for a configurable duration
+- Atomic stock deduction during reservation creation
+- Prevent reservations exceeding available inventory
+- Cancel active reservations and restore stock
+- Automatically expire overdue reservations
+- Restore inventory when reservations expire
+- Reservation history and pagination
+
+### Engineering and reliability
+- PostgreSQL persistence with SQLAlchemy
+- Database migrations managed by Alembic
+- Dedicated integration-test database
+- Automated backend tests
+- Concurrent reservation demonstration
+- Background reservation-expiry worker
 - Interactive API documentation
 
 ## Technology Stack
 
-- Python, FastAPI, Uvicorn
-- PostgreSQL, SQLAlchemy, Psycopg
-- Pydantic
-- pytest
-- Git
+| Area | Technology |
+|---|---|
+| Frontend | Angular, TypeScript, HTML, CSS |
+| Backend | Python, FastAPI, Uvicorn |
+| Database | PostgreSQL |
+| ORM | SQLAlchemy |
+| Validation | Pydantic |
+| Migrations | Alembic |
+| Testing | pytest, HTTPX, HTTPX2 |
+| Version control | Git |
 
-## Local Development
+## Architecture
 
-1. Install Python 3.14 and PostgreSQL 18.
-2. Create the PostgreSQL database named `stockflow`.
-3. Create a local `.env` file with your database connection settings.
-4. Install dependencies:
+```text
+Angular Dashboard
+       |
+       | HTTP requests
+       v
+FastAPI Backend
+       |
+       | SQLAlchemy
+       v
+PostgreSQL Database
 
-   `python -m pip install -r requirements.txt`
+Expiry Worker
+       |
+       | Periodic API requests
+       v
+FastAPI Reservation Expiry Endpoint
 
-5. Initialize the database:
+## Local Development Setup
 
-   `python init_db.py`
+### 1. Prerequisites
 
-6. Start the API:
+Install Python 3.14, PostgreSQL 18, Node.js, npm, and Git.
 
-   `python -m uvicorn main:app --reload`
+### 2. Clone the repository
 
-7. Open Swagger UI:
+```powershell
+git clone <repository-url>
+Set-Location StockFlow
+```
 
-   http://127.0.0.1:8000/docs
+### 3. Create PostgreSQL databases
 
-Run the expiry worker in a separate terminal:
+Create two databases:
 
-`python expiry_worker.py`
+- `stockflow` for application development.
+- `stockflow_test` for automated integration tests.
 
-## Testing
+The PostgreSQL user must have permission to manage the test schema.
 
-Run automated validation tests:
-
-`python -m pytest -q`
-
-Run the concurrency demonstration only when product ID 6 is the dedicated concurrency test product with exactly 10 units available:
-
-`python test_concurrency.py`
-
-The concurrency script cancels the reservations it creates and checks that inventory returns to its initial quantity.
-
-## Production Hardening Roadmap
-
-Before production deployment, add authentication and authorization, database migrations, protected operational endpoints, managed secrets, structured monitoring, deployment automation, and broader integration and failure-recovery tests.
-
-## Full-Stack Development
-
-StockFlow includes an Angular frontend and a FastAPI backend.
-
-### Technology Stack
-
-- Frontend: Angular, TypeScript, HTML, CSS
-- Backend: Python, FastAPI, Uvicorn
-- Database: PostgreSQL
-- ORM: SQLAlchemy
-- Configuration: python-dotenv
-- Testing: pytest and HTTPX
-
-### Environment Configuration
-
-Copy the example environment file:
+### 4. Configure environment variables
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-Configure DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, and CORS_ORIGINS in the local .env file.
+Configure `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, and `CORS_ORIGINS` in `.env`.
 
-Never commit .env or real database credentials.
+Never commit real credentials or `.env`.
 
-Application settings are centralized in config.py. Database connections use database.py.
-
-### Install Development Dependencies
+### 5. Set up Python
 
 ```powershell
+py -3.14 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 python -m pip install -r requirements-dev.txt
 ```
 
-### Run the Angular Frontend
+### 6. Initialize the database
 
-Open a separate terminal from the project root:
+```powershell
+python init_db.py
+```
+
+This applies pending Alembic migrations and verifies the application tables.
+
+For an existing database created before Alembic, verify schema equivalence before recording the initial migration:
+
+```powershell
+python -m alembic check
+python -m alembic stamp head
+```
+
+Only stamp an existing database after confirming that its schema matches the migration.
+
+### 7. Start the backend
+
+```powershell
+python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Swagger documentation: http://127.0.0.1:8000/docs
+
+### 8. Start the expiry worker
+
+In a separate terminal:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python expiry_worker.py
+```
+
+Run one worker instance during local development.
+
+### 9. Start the Angular frontend
+
+In another terminal:
 
 ```powershell
 Set-Location .\frontend
@@ -106,24 +150,83 @@ npm ci
 npm start
 ```
 
-The dashboard is available at http://localhost:4200.
+Dashboard: http://localhost:4200
 
-### Build the Frontend
+### 10. Build the frontend
+
+From the `frontend` directory:
 
 ```powershell
 npm run build
 ```
 
-### Run Backend Tests
+## Database Migrations
+
+Check the current migration:
+
+```powershell
+python -m alembic current
+```
+
+Check schema consistency:
+
+```powershell
+python -m alembic check
+```
+
+Generate a migration after changing SQLAlchemy models:
+
+```powershell
+python -m alembic revision --autogenerate -m "Describe schema change"
+```
+
+Review generated migrations before applying them.
+
+Apply migrations:
+
+```powershell
+python -m alembic upgrade head
+```
+
+## Automated Testing
+
+Integration tests use the dedicated `stockflow_test` database.
+
+Run the backend test suite:
 
 ```powershell
 python -m pytest -v
 ```
 
-The configuration and reservation integration tests use the dedicated stockflow_test database.
+The test fixtures reset the isolated test schema using Alembic migrations. Never configure the test database to point to a database containing important development or production data.
 
-### Production Deployment Note
+### Concurrency demonstration
 
-Set CORS_ORIGINS to the actual deployed frontend origins. Use HTTPS in production and configure database credentials through a secure environment or secret manager.
+```powershell
+python test_concurrency.py
+```
 
-StockFlow is currently a development-stage application. Complete authentication, migrations, operational endpoint protection, monitoring, and deployment hardening before production use.
+This manual demonstration requires product ID 6 to be the dedicated concurrency test product with exactly 10 units available. It tests concurrent reservations and verifies inventory restoration.
+
+## Production Readiness
+
+StockFlow is currently a development-stage project.
+
+Before production deployment, implement:
+
+- Authentication and authorization.
+- Protection of operational endpoints.
+- Production secret management.
+- Structured logging and monitoring.
+- Frontend automated testing.
+- Rate limiting and additional security controls.
+- Docker-based deployment.
+- Continuous integration and delivery.
+- Backup, restore, and recovery verification.
+- A suitable project license.
+
+Do not expose the current application publicly as a production service without these controls.
+
+## License
+
+No project license is currently specified. Select and add an appropriate license before distributing the project.
