@@ -1,34 +1,17 @@
-﻿import os
-
-from dotenv import load_dotenv
-from sqlalchemy import create_engine
+﻿from sqlalchemy import create_engine
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import sessionmaker
 
-load_dotenv(encoding="utf-8-sig")
+from config import settings
 
-required_settings = (
-    "DB_HOST",
-    "DB_PORT",
-    "DB_NAME",
-    "DB_USER",
-    "DB_PASSWORD",
-)
-
-missing = [key for key in required_settings if not os.getenv(key)]
-
-if missing:
-    raise RuntimeError(
-        f"Missing database settings: {', '.join(missing)}"
-    )
 
 database_url = URL.create(
     drivername="postgresql+psycopg",
-    username=os.environ["DB_USER"],
-    password=os.environ["DB_PASSWORD"],
-    host=os.environ["DB_HOST"],
-    port=int(os.environ["DB_PORT"]),
-    database=os.environ["DB_NAME"],
+    username=settings.db_user,
+    password=settings.db_password,
+    host=settings.db_host,
+    port=settings.db_port,
+    database=settings.db_name,
 )
 
 engine = create_engine(

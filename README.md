@@ -62,3 +62,68 @@ The concurrency script cancels the reservations it creates and checks that inven
 ## Production Hardening Roadmap
 
 Before production deployment, add authentication and authorization, database migrations, protected operational endpoints, managed secrets, structured monitoring, deployment automation, and broader integration and failure-recovery tests.
+
+## Full-Stack Development
+
+StockFlow includes an Angular frontend and a FastAPI backend.
+
+### Technology Stack
+
+- Frontend: Angular, TypeScript, HTML, CSS
+- Backend: Python, FastAPI, Uvicorn
+- Database: PostgreSQL
+- ORM: SQLAlchemy
+- Configuration: python-dotenv
+- Testing: pytest and HTTPX
+
+### Environment Configuration
+
+Copy the example environment file:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Configure DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, and CORS_ORIGINS in the local .env file.
+
+Never commit .env or real database credentials.
+
+Application settings are centralized in config.py. Database connections use database.py.
+
+### Install Development Dependencies
+
+```powershell
+python -m pip install -r requirements-dev.txt
+```
+
+### Run the Angular Frontend
+
+Open a separate terminal from the project root:
+
+```powershell
+Set-Location .\frontend
+npm ci
+npm start
+```
+
+The dashboard is available at http://localhost:4200.
+
+### Build the Frontend
+
+```powershell
+npm run build
+```
+
+### Run Backend Tests
+
+```powershell
+python -m pytest -v
+```
+
+The configuration and reservation integration tests use the dedicated stockflow_test database.
+
+### Production Deployment Note
+
+Set CORS_ORIGINS to the actual deployed frontend origins. Use HTTPS in production and configure database credentials through a secure environment or secret manager.
+
+StockFlow is currently a development-stage application. Complete authentication, migrations, operational endpoint protection, monitoring, and deployment hardening before production use.

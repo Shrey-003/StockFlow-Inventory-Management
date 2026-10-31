@@ -8,6 +8,7 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from config import settings
 from database import SessionLocal, engine
 from models import Product, Reservation
 from schemas import (
@@ -28,15 +29,14 @@ app = FastAPI(
 )
 
 
+# Configure permitted frontend origins through CORS_ORIGINS.
+# Defaults support local Angular development.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:4200",
-        "http://127.0.0.1:4200",
-    ],
+    allow_origins=list(settings.cors_origins),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 
