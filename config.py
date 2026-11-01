@@ -20,6 +20,8 @@ DEFAULT_CORS_ORIGINS = (
     "http://127.0.0.1:4200",
 )
 
+DEFAULT_EXPIRY_WORKER_API_URL = "http://127.0.0.1:8000"
+
 
 def get_required_setting(name: str) -> str:
     value = os.getenv(name)
@@ -50,6 +52,39 @@ def get_integer_setting(name: str, default: int) -> int:
         raise RuntimeError(
             f"{name} must be a valid integer."
         ) from exc
+
+
+def get_expiry_worker_api_url() -> str:
+    raw_url = os.getenv(
+        "EXPIRY_WORKER_API_URL",
+        DEFAULT_EXPIRY_WORKER_API_URL,
+    ).strip().rstrip("/")
+
+    parsed = urlsplit(raw_url)
+
+    try:
+        if parsed.port is not None and not 1 <= parsed.port <= 65535:
+            raise ValueError("Invalid port")
+    except ValueError as exc:
+        raise RuntimeError(
+            "EXPIRY_WORKER_API_URL must contain a valid port."
+        ) from exc
+
+    if (
+        parsed.scheme not in ("http", "https")
+        or not parsed.netloc
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+        or parsed.username
+        or parsed.password
+    ):
+        raise RuntimeError(
+            "EXPIRY_WORKER_API_URL must be an HTTP or HTTPS base URL "
+            "without a path, query, fragment or credentials."
+        )
+
+    return raw_url
 
 
 def get_cors_origins() -> tuple[str, ...]:
@@ -97,16 +132,24 @@ class Settings:
     db_user: str
     db_password: str
     cors_origins: tuple[str, ...]
+
     jwt_secret_key: str
     worker_api_token: str
+    access_token_expire_minutes: int
+
     login_rate_limit_secret: str
     login_rate_limit_window_seconds: int
     login_rate_limit_ip_username_max_attempts: int
     login_rate_limit_ip_max_attempts: int
-    access_token_expire_minutes: int
+
+    expiry_worker_api_url: str
+    expiry_worker_interval_seconds: int
+    expiry_worker_request_timeout_seconds: int
+    expiry_worker_max_backoff_seconds: int
 
     @classmethod
     def from_environment(cls) -> "Settings":
+        # PostgreSQL configuration.
         try:
             db_port = int(get_required_setting("DB_PORT"))
         except ValueError as exc:
@@ -119,19 +162,18 @@ class Settings:
                 "DB_PORT must be between 1 and 65535."
             )
 
-        try:
-            token_expiry = int(
-                os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30")
-            )
-        except ValueError as exc:
-            raise RuntimeError(
-                "ACCESS_TOKEN_EXPIRE_MINUTES must be a valid integer."
-            ) from exc
+        # Authentication configuration.
+        token_expiry = get_integer_setting(
+            "ACCESS_TOKEN_EXPIRE_MINUTES", 30
+        )
 
         if not 1 <= token_expiry <= 1440:
             raise RuntimeError(
                 "ACCESS_TOKEN_EXPIRE_MINUTES must be between 1 and 1440."
             )
+
+        jwt_secret = get_required_secret("JWT_SECRET_KEY")
+        worker_token = get_required_secret("WORKER_API_TOKEN")
 
         # Login rate-limit configuration.
         login_rate_limit_secret = get_required_secret(
@@ -171,6 +213,38 @@ class Settings:
                 "or equal to LOGIN_RATE_LIMIT_IP_USERNAME_MAX_ATTEMPTS."
             )
 
+        # Expiry worker configuration.
+        expiry_worker_api_url = get_expiry_worker_api_url()
+
+        expiry_worker_interval = get_integer_setting(
+            "EXPIRY_WORKER_INTERVAL_SECONDS", 30
+        )
+
+        expiry_worker_timeout = get_integer_setting(
+            "EXPIRY_WORKER_REQUEST_TIMEOUT_SECONDS", 10
+        )
+
+        expiry_worker_max_backoff = get_integer_setting(
+            "EXPIRY_WORKER_MAX_BACKOFF_SECONDS", 300
+        )
+
+        if not 5 <= expiry_worker_interval <= 3600:
+            raise RuntimeError(
+                "EXPIRY_WORKER_INTERVAL_SECONDS must be between 5 and 3600."
+            )
+
+        if not 1 <= expiry_worker_timeout <= 120:
+            raise RuntimeError(
+                "EXPIRY_WORKER_REQUEST_TIMEOUT_SECONDS must be between 1 and 120."
+            )
+
+        if not expiry_worker_interval <= expiry_worker_max_backoff <= 3600:
+            raise RuntimeError(
+                "EXPIRY_WORKER_MAX_BACKOFF_SECONDS must be greater than "
+                "or equal to EXPIRY_WORKER_INTERVAL_SECONDS and no greater "
+                "than 3600."
+            )
+
         return cls(
             db_host=get_required_setting("DB_HOST"),
             db_port=db_port,
@@ -178,13 +252,20 @@ class Settings:
             db_user=get_required_setting("DB_USER"),
             db_password=get_required_setting("DB_PASSWORD"),
             cors_origins=get_cors_origins(),
-            jwt_secret_key=get_required_secret("JWT_SECRET_KEY"),
-            worker_api_token=get_required_secret("WORKER_API_TOKEN"),
+
+            jwt_secret_key=jwt_secret,
+            worker_api_token=worker_token,
+            access_token_expire_minutes=token_expiry,
+
             login_rate_limit_secret=login_rate_limit_secret,
             login_rate_limit_window_seconds=rate_limit_window,
             login_rate_limit_ip_username_max_attempts=ip_username_max_attempts,
             login_rate_limit_ip_max_attempts=ip_max_attempts,
-            access_token_expire_minutes=token_expiry,
+
+            expiry_worker_api_url=expiry_worker_api_url,
+            expiry_worker_interval_seconds=expiry_worker_interval,
+            expiry_worker_request_timeout_seconds=expiry_worker_timeout,
+            expiry_worker_max_backoff_seconds=expiry_worker_max_backoff,
         )
 
 
