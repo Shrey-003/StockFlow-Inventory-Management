@@ -1,5 +1,6 @@
+
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import {
   Observable,
   catchError,
@@ -41,8 +42,17 @@ export class AuthService {
 
     return this.http.get<AuthUser>(`${API_BASE_URL}/auth/me`).pipe(
       tap(user => this.authState.setCurrentUser(user)),
-      catchError(() => {
-        this.authState.clear();
+      catchError((error: unknown) => {
+        // A 401 means the token is invalid, expired, or revoked.
+        if (
+          error instanceof HttpErrorResponse &&
+          error.status === 401
+        ) {
+          this.authState.clear();
+        }
+
+        // Preserve the saved token during temporary network or server
+        // failures so session restoration can be retried later.
         return of(null);
       }),
     );
@@ -72,7 +82,37 @@ export class AuthService {
     );
   }
 
-  logout(): void {
-    this.authState.clear();
+  logout(): Observable<void> {
+    const token = this.authState.accessToken;
+
+    if (!token) {
+      this.authState.clear();
+      return of(void 0);
+    }
+
+    return this.http.post<void>(
+      `${API_BASE_URL}/auth/logout`,
+      null,
+    ).pipe(
+      tap(() => {
+        this.authState.clear();
+      }),
+      catchError((error: unknown) => {
+        // Always end the local session, even when the API is unavailable.
+        this.authState.clear();
+
+        // An already-invalid or revoked token is effectively logged out.
+        if (
+          error instanceof HttpErrorResponse &&
+          error.status === 401
+        ) {
+          return of(void 0);
+        }
+
+        // Preserve the error so the UI can inform the user that
+        // server-side revocation could not be confirmed.
+        return throwError(() => error);
+      }),
+    );
   }
 }

@@ -93,7 +93,7 @@ export class App implements OnInit {
   form: ProductForm = this.emptyForm();
 
   ngOnInit(): void {
-    this.auth.currentUser$.subscribe(user => {
+    this.auth.currentUser$.subscribe((user) => {
       this.zone.run(() => {
         const wasAuthenticated = this.currentUser !== null;
         this.currentUser = user;
@@ -106,7 +106,7 @@ export class App implements OnInit {
       });
     });
 
-    this.auth.restoreSession().subscribe(user => {
+    this.auth.restoreSession().subscribe((user) => {
       this.zone.run(() => {
         this.currentUser = user;
         this.authReady = true;
@@ -160,33 +160,51 @@ export class App implements OnInit {
     this.loginLoading = true;
     this.loginError = '';
 
-    this.auth.login(username, password).pipe(
-      finalize(() => this.zone.run(() => {
-        this.loginLoading = false;
-        this.cdr.detectChanges();
-      })),
-    ).subscribe({
-      next: user => this.zone.run(() => {
-        this.currentUser = user;
-        this.loginPassword = '';
-        this.loginError = '';
-        this.currentView = 'overview';
-        this.initializeDashboard();
-        this.cdr.detectChanges();
-      }),
-      error: (error: HttpErrorResponse) => this.zone.run(() => {
-        this.loginError = error.status === 401 || error.status === 422
-          ? 'Invalid username or password.'
-          : this.describeError(error);
-        this.cdr.detectChanges();
-      }),
-    });
+    this.auth
+      .login(username, password)
+      .pipe(
+        finalize(() =>
+          this.zone.run(() => {
+            this.loginLoading = false;
+            this.cdr.detectChanges();
+          }),
+        ),
+      )
+      .subscribe({
+        next: (user) =>
+          this.zone.run(() => {
+            this.currentUser = user;
+            this.loginPassword = '';
+            this.loginError = '';
+            this.currentView = 'overview';
+            this.initializeDashboard();
+            this.cdr.detectChanges();
+          }),
+        error: (error: HttpErrorResponse) =>
+          this.zone.run(() => {
+            this.loginError =
+              error.status === 401 || error.status === 422
+                ? 'Invalid username or password.'
+                : this.describeError(error);
+            this.cdr.detectChanges();
+          }),
+      });
   }
 
   logout(): void {
-    this.auth.logout();
     this.loginPassword = '';
     this.loginError = '';
+
+    this.auth.logout().subscribe({
+      error: () => {
+        this.zone.run(() => {
+          this.loginError =
+            'You were signed out locally, but the server could not confirm token revocation. The token may remain valid until it expires.';
+
+          this.cdr.detectChanges();
+        });
+      },
+    });
   }
 
   get filteredProducts(): Product[] {
@@ -197,22 +215,18 @@ export class App implements OnInit {
     }
 
     return this.products.filter((product) =>
-      [product.name, product.sku, product.description ?? '']
-        .some((value) => value.toLowerCase().includes(term)),
+      [product.name, product.sku, product.description ?? ''].some((value) =>
+        value.toLowerCase().includes(term),
+      ),
     );
   }
 
   get totalUnits(): number {
-    return this.products.reduce(
-      (sum, product) => sum + product.stock_quantity,
-      0,
-    );
+    return this.products.reduce((sum, product) => sum + product.stock_quantity, 0);
   }
 
   get lowStockCount(): number {
-    return this.products.filter(
-      (product) => product.stock_quantity <= 5,
-    ).length;
+    return this.products.filter((product) => product.stock_quantity <= 5).length;
   }
 
   get inventoryValue(): number {
@@ -222,10 +236,30 @@ export class App implements OnInit {
     );
   }
 
+  get attentionProducts(): Product[] {
+    return this.products
+      .filter((product) => product.stock_quantity <= 5)
+      .sort((a, b) => a.stock_quantity - b.stock_quantity);
+  }
+
+  get recentlyUpdatedProducts(): Product[] {
+    return [...this.products]
+      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      .slice(0, 5);
+  }
+
   checkHealth(): void {
     this.http.get(`${this.apiUrl}/health/db`).subscribe({
-      next: () => this.zone.run(() => { this.apiConnected = true; this.cdr.detectChanges(); }),
-      error: () => this.zone.run(() => { this.apiConnected = false; this.cdr.detectChanges(); }),
+      next: () =>
+        this.zone.run(() => {
+          this.apiConnected = true;
+          this.cdr.detectChanges();
+        }),
+      error: () =>
+        this.zone.run(() => {
+          this.apiConnected = false;
+          this.cdr.detectChanges();
+        }),
     });
   }
 
@@ -233,22 +267,32 @@ export class App implements OnInit {
     this.loading = true;
     this.errorMessage = '';
 
-    this.http.get<Product[]>(`${this.apiUrl}/products`, {
-      params: { skip: 0, limit: 100 },
-    }).pipe(
-      finalize(() => this.zone.run(() => { this.loading = false; this.cdr.detectChanges(); })),
-    ).subscribe({
-      next: (products) => this.zone.run(() => {
-        this.products = [...products].sort((a, b) => b.id - a.id);
-        this.apiConnected = true;
-        this.cdr.detectChanges();
-      }),
-      error: (error: HttpErrorResponse) => this.zone.run(() => {
-        this.apiConnected = false;
-        this.errorMessage = this.describeError(error);
-        this.cdr.detectChanges();
-      }),
-    });
+    this.http
+      .get<Product[]>(`${this.apiUrl}/products`, {
+        params: { skip: 0, limit: 100 },
+      })
+      .pipe(
+        finalize(() =>
+          this.zone.run(() => {
+            this.loading = false;
+            this.cdr.detectChanges();
+          }),
+        ),
+      )
+      .subscribe({
+        next: (products) =>
+          this.zone.run(() => {
+            this.products = [...products].sort((a, b) => b.id - a.id);
+            this.apiConnected = true;
+            this.cdr.detectChanges();
+          }),
+        error: (error: HttpErrorResponse) =>
+          this.zone.run(() => {
+            this.apiConnected = false;
+            this.errorMessage = this.describeError(error);
+            this.cdr.detectChanges();
+          }),
+      });
   }
 
   showOverview(): void {
@@ -267,23 +311,23 @@ export class App implements OnInit {
   }
 
   get activeReservationsCount(): number {
-    return this.reservations.filter(r => r.status === 'active').length;
+    return this.reservations.filter((r) => r.status === 'active').length;
   }
 
   get cancelledReservationsCount(): number {
-    return this.reservations.filter(r => r.status === 'cancelled').length;
+    return this.reservations.filter((r) => r.status === 'cancelled').length;
   }
 
   get expiredReservationsCount(): number {
-    return this.reservations.filter(r => r.status === 'expired').length;
+    return this.reservations.filter((r) => r.status === 'expired').length;
   }
 
   get selectedReservationProduct(): Product | undefined {
-    return this.products.find(p => p.id === this.reservationForm.product_id);
+    return this.products.find((p) => p.id === this.reservationForm.product_id);
   }
 
   productNameForReservation(reservation: Reservation): string {
-    const product = this.products.find(p => p.id === reservation.product_id);
+    const product = this.products.find((p) => p.id === reservation.product_id);
     return product ? product.name : 'Product #' + reservation.product_id;
   }
 
@@ -295,23 +339,30 @@ export class App implements OnInit {
     this.reservationsLoading = true;
     this.reservationError = '';
 
-    this.http.get<Reservation[]>(this.apiUrl + '/reservations', {
-      params: { skip: 0, limit: 100 },
-    }).pipe(
-      finalize(() => this.zone.run(() => {
-        this.reservationsLoading = false;
-        this.cdr.detectChanges();
-      })),
-    ).subscribe({
-      next: records => this.zone.run(() => {
-        this.reservations = records;
-        this.cdr.detectChanges();
-      }),
-      error: (error: HttpErrorResponse) => this.zone.run(() => {
-        this.reservationError = this.describeError(error);
-        this.cdr.detectChanges();
-      }),
-    });
+    this.http
+      .get<Reservation[]>(this.apiUrl + '/reservations', {
+        params: { skip: 0, limit: 100 },
+      })
+      .pipe(
+        finalize(() =>
+          this.zone.run(() => {
+            this.reservationsLoading = false;
+            this.cdr.detectChanges();
+          }),
+        ),
+      )
+      .subscribe({
+        next: (records) =>
+          this.zone.run(() => {
+            this.reservations = records;
+            this.cdr.detectChanges();
+          }),
+        error: (error: HttpErrorResponse) =>
+          this.zone.run(() => {
+            this.reservationError = this.describeError(error);
+            this.cdr.detectChanges();
+          }),
+      });
   }
 
   refreshReservations(): void {
@@ -320,7 +371,7 @@ export class App implements OnInit {
   }
 
   openReservationForm(): void {
-    const available = this.products.find(p => p.stock_quantity > 0);
+    const available = this.products.find((p) => p.stock_quantity > 0);
     this.reservationForm = {
       product_id: available?.id ?? null,
       quantity: 1,
@@ -359,52 +410,64 @@ export class App implements OnInit {
     this.reservationError = '';
     this.reservationSuccess = '';
 
-    this.http.post<Reservation>(
-      this.apiUrl + '/products/' + form.product_id + '/reservations',
-      { quantity: form.quantity, ttl_minutes: form.ttl_minutes },
-    ).pipe(
-      finalize(() => this.zone.run(() => {
-        this.reservationSaving = false;
-        this.cdr.detectChanges();
-      })),
-    ).subscribe({
-      next: reservation => this.zone.run(() => {
-        this.showReservationForm = false;
-        this.reservationSuccess = 'Reservation #' + reservation.id + ' created successfully.';
-        this.cdr.detectChanges();
-        this.refreshReservations();
-      }),
-      error: (error: HttpErrorResponse) => this.zone.run(() => {
-        this.reservationError = this.describeError(error);
-        this.cdr.detectChanges();
-      }),
-    });
+    this.http
+      .post<Reservation>(this.apiUrl + '/products/' + form.product_id + '/reservations', {
+        quantity: form.quantity,
+        ttl_minutes: form.ttl_minutes,
+      })
+      .pipe(
+        finalize(() =>
+          this.zone.run(() => {
+            this.reservationSaving = false;
+            this.cdr.detectChanges();
+          }),
+        ),
+      )
+      .subscribe({
+        next: (reservation) =>
+          this.zone.run(() => {
+            this.showReservationForm = false;
+            this.reservationSuccess = 'Reservation #' + reservation.id + ' created successfully.';
+            this.cdr.detectChanges();
+            this.refreshReservations();
+          }),
+        error: (error: HttpErrorResponse) =>
+          this.zone.run(() => {
+            this.reservationError = this.describeError(error);
+            this.cdr.detectChanges();
+          }),
+      });
   }
 
   cancelReservation(reservation: Reservation): void {
     if (reservation.status !== 'active') return;
 
-    if (!window.confirm('Cancel reservation #' + reservation.id + '? Its quantity will be returned to inventory.')) {
+    if (
+      !window.confirm(
+        'Cancel reservation #' + reservation.id + '? Its quantity will be returned to inventory.',
+      )
+    ) {
       return;
     }
 
     this.reservationError = '';
     this.reservationSuccess = '';
 
-    this.http.post<Reservation>(
-      this.apiUrl + '/reservations/' + reservation.id + '/cancel',
-      {},
-    ).subscribe({
-      next: () => this.zone.run(() => {
-        this.reservationSuccess = 'Reservation #' + reservation.id + ' cancelled successfully.';
-        this.cdr.detectChanges();
-        this.refreshReservations();
-      }),
-      error: (error: HttpErrorResponse) => this.zone.run(() => {
-        this.reservationError = this.describeError(error);
-        this.cdr.detectChanges();
-      }),
-    });
+    this.http
+      .post<Reservation>(this.apiUrl + '/reservations/' + reservation.id + '/cancel', {})
+      .subscribe({
+        next: () =>
+          this.zone.run(() => {
+            this.reservationSuccess = 'Reservation #' + reservation.id + ' cancelled successfully.';
+            this.cdr.detectChanges();
+            this.refreshReservations();
+          }),
+        error: (error: HttpErrorResponse) =>
+          this.zone.run(() => {
+            this.reservationError = this.describeError(error);
+            this.cdr.detectChanges();
+          }),
+      });
   }
 
   refresh(): void {
@@ -449,15 +512,17 @@ export class App implements OnInit {
     this.successMessage = '';
 
     this.http.delete<void>(`${this.apiUrl}/products/${product.id}`).subscribe({
-      next: () => this.zone.run(() => {
-        this.successMessage = `Deleted "${product.name}" successfully.`;
-        this.cdr.detectChanges();
-        this.loadProducts();
-      }),
-      error: (error: HttpErrorResponse) => this.zone.run(() => {
-        this.errorMessage = this.describeError(error);
-        this.cdr.detectChanges();
-      }),
+      next: () =>
+        this.zone.run(() => {
+          this.successMessage = `Deleted "${product.name}" successfully.`;
+          this.cdr.detectChanges();
+          this.loadProducts();
+        }),
+      error: (error: HttpErrorResponse) =>
+        this.zone.run(() => {
+          this.errorMessage = this.describeError(error);
+          this.cdr.detectChanges();
+        }),
     });
   }
 
@@ -491,30 +556,41 @@ export class App implements OnInit {
     this.successMessage = '';
 
     const editingId = this.editingProductId;
-    const request = editingId === null
-      ? this.http.post<Product>(`${this.apiUrl}/products`, payload)
-      : this.http.patch<Product>(
-          `${this.apiUrl}/products/${editingId}`,
-          this.updatePayload(payload, editingId),
-        );
+    const request =
+      editingId === null
+        ? this.http.post<Product>(`${this.apiUrl}/products`, payload)
+        : this.http.patch<Product>(
+            `${this.apiUrl}/products/${editingId}`,
+            this.updatePayload(payload, editingId),
+          );
 
-    request.pipe(
-      finalize(() => this.zone.run(() => { this.saving = false; this.cdr.detectChanges(); })),
-    ).subscribe({
-      next: (product) => this.zone.run(() => {
-        this.showForm = false;
-        this.successMessage = editingId === null
-          ? `Created "${product.name}" successfully.`
-          : `Updated "${product.name}" successfully.`;
-        this.editingProductId = null;
-        this.cdr.detectChanges();
-        this.loadProducts();
-      }),
-      error: (error: HttpErrorResponse) => this.zone.run(() => {
-        this.errorMessage = this.describeError(error);
-        this.cdr.detectChanges();
-      }),
-    });
+    request
+      .pipe(
+        finalize(() =>
+          this.zone.run(() => {
+            this.saving = false;
+            this.cdr.detectChanges();
+          }),
+        ),
+      )
+      .subscribe({
+        next: (product) =>
+          this.zone.run(() => {
+            this.showForm = false;
+            this.successMessage =
+              editingId === null
+                ? `Created "${product.name}" successfully.`
+                : `Updated "${product.name}" successfully.`;
+            this.editingProductId = null;
+            this.cdr.detectChanges();
+            this.loadProducts();
+          }),
+        error: (error: HttpErrorResponse) =>
+          this.zone.run(() => {
+            this.errorMessage = this.describeError(error);
+            this.cdr.detectChanges();
+          }),
+      });
   }
 
   stockStatus(product: Product): string {
@@ -540,11 +616,11 @@ export class App implements OnInit {
     productId: number,
   ): Record<string, unknown> {
     const update: Record<string, unknown> = { ...payload };
-    const current = this.products.find(p => p.id === productId);
+    const current = this.products.find((p) => p.id === productId);
 
     // Avoid re-sending an unchanged SKU as a duplicate.
     if (current && current.sku === payload.sku) {
-      delete update["sku"];
+      delete update['sku'];
     }
 
     return update;
