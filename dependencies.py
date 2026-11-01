@@ -1,6 +1,7 @@
+
 from collections.abc import Generator
 import hmac
-from typing import Callable
+from typing import Any, Callable
 
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -8,8 +9,8 @@ from sqlalchemy.orm import Session
 
 from config import settings
 from database import SessionLocal
-from models import User
-from security import decode_access_token
+from models import RevokedToken, User
+from security import decode_access_token, hash_token_identifier
 
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -32,12 +33,14 @@ def authentication_error() -> HTTPException:
     )
 
 
-def get_current_user(
+def get_current_token_claims(
     credentials: HTTPAuthorizationCredentials | None = Depends(
         bearer_scheme
     ),
     db: Session = Depends(get_db),
-) -> User:
+) -> dict[str, Any]:
+    """Validate the JWT and reject revoked tokens."""
+
     if credentials is None:
         raise authentication_error()
 
@@ -45,6 +48,22 @@ def get_current_user(
 
     if claims is None:
         raise authentication_error()
+
+    jti_hash = hash_token_identifier(claims["jti"])
+
+    revoked_token = db.get(RevokedToken, jti_hash)
+
+    if revoked_token is not None:
+        raise authentication_error()
+
+    return claims
+
+
+def get_current_user(
+    claims: dict[str, Any] = Depends(get_current_token_claims),
+    db: Session = Depends(get_db),
+) -> User:
+    """Load the authenticated user after validating the JWT."""
 
     try:
         user_id = int(claims["sub"])

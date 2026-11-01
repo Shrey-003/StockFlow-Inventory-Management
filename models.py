@@ -154,6 +154,25 @@ class LoginRateLimit(Base):
         nullable=False,
     )
 
+class RevokedToken(Base):
+    __tablename__ = "revoked_tokens"
+
+    jti_hash: Mapped[str] = mapped_column(
+        String(64),
+        primary_key=True,
+    )
+
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+
+    revoked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
 
 class Reservation(Base):
     __tablename__ = "reservations"

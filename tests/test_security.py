@@ -49,6 +49,7 @@ def test_access_token_creation_and_validation():
     assert claims["role"] == "admin"
     assert claims["token_type"] == "access"
     assert claims["exp"] > claims["iat"]
+    assert claims["jti"]
 
 
 def test_access_token_rejects_tampering():
@@ -72,6 +73,7 @@ def test_access_token_rejects_expired_token():
             "sub": "42",
             "role": "staff",
             "token_type": "access",
+            "jti": "expired-token-id",
             "iat": int((now - timedelta(minutes=10)).timestamp()),
             "exp": int((now - timedelta(minutes=5)).timestamp()),
         },
@@ -90,6 +92,7 @@ def test_access_token_rejects_invalid_role():
             "sub": "42",
             "role": "superuser",
             "token_type": "access",
+            "jti": "invalid-role-token-id",
             "iat": int(now.timestamp()),
             "exp": int((now + timedelta(minutes=5)).timestamp()),
         },
@@ -108,6 +111,7 @@ def test_access_token_rejects_wrong_token_type():
             "sub": "42",
             "role": "staff",
             "token_type": "refresh",
+            "jti": "wrong-type-token-id",
             "iat": int(now.timestamp()),
             "exp": int((now + timedelta(minutes=5)).timestamp()),
         },
@@ -133,9 +137,10 @@ def test_access_token_rejects_invalid_claims(subject, role):
     with pytest.raises(ValueError):
         create_access_token(subject=subject, role=role)
 
+
 @pytest.mark.parametrize(
     "missing_claim",
-    ["sub", "role", "token_type", "iat", "exp"],
+    ["sub", "role", "token_type", "iat", "exp", "jti"],
 )
 def test_access_token_rejects_missing_required_claims(missing_claim):
     now = datetime.now(timezone.utc)
@@ -146,6 +151,7 @@ def test_access_token_rejects_missing_required_claims(missing_claim):
         "token_type": "access",
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(minutes=5)).timestamp()),
+        "jti": "test-token-identifier",
     }
 
     payload.pop(missing_claim)
@@ -157,3 +163,22 @@ def test_access_token_rejects_missing_required_claims(missing_claim):
     )
 
     assert decode_access_token(token) is None
+
+
+def test_access_tokens_have_unique_jti():
+    first_token = create_access_token(
+        subject="42",
+        role="admin",
+    )
+
+    second_token = create_access_token(
+        subject="42",
+        role="admin",
+    )
+
+    first_claims = decode_access_token(first_token)
+    second_claims = decode_access_token(second_token)
+
+    assert first_claims is not None
+    assert second_claims is not None
+    assert first_claims["jti"] != second_claims["jti"]

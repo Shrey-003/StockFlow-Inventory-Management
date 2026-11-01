@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
+import hashlib
 from typing import Any
+from uuid import uuid4
 
 import jwt
 from jwt.exceptions import InvalidTokenError
@@ -41,8 +43,17 @@ def verify_password(password: str, password_hash: str) -> bool:
     return password_hasher.verify(password, password_hash)
 
 
+def hash_token_identifier(jti: str) -> str:
+    """Return a SHA-256 digest of a JWT identifier."""
+
+    if not isinstance(jti, str) or not jti:
+        raise ValueError("JWT identifier must be a non-empty string.")
+
+    return hashlib.sha256(jti.encode("utf-8")).hexdigest()
+
+
 def create_access_token(*, subject: str, role: str) -> str:
-    """Create a signed JWT access token."""
+    """Create a signed JWT access token with a unique identifier."""
 
     if not isinstance(subject, str) or not subject.strip():
         raise ValueError("Token subject must be a non-empty string.")
@@ -51,6 +62,7 @@ def create_access_token(*, subject: str, role: str) -> str:
         raise ValueError("Invalid user role.")
 
     now = datetime.now(timezone.utc)
+
     expires_at = now + timedelta(
         minutes=settings.access_token_expire_minutes
     )
@@ -59,6 +71,7 @@ def create_access_token(*, subject: str, role: str) -> str:
         "sub": subject,
         "role": role,
         "token_type": "access",
+        "jti": uuid4().hex,
         "iat": int(now.timestamp()),
         "exp": int(expires_at.timestamp()),
     }
@@ -81,14 +94,15 @@ def decode_access_token(token: str) -> dict[str, Any] | None:
             token,
             settings.jwt_secret_key,
             algorithms=[JWT_ALGORITHM],
-        options={
-            "require": [
+            options={
+                "require": [
                     "exp",
                     "iat",
                     "sub",
                     "role",
                     "token_type",
-            ],
+                    "jti",
+                ],
             },
         )
     except InvalidTokenError:
@@ -101,6 +115,9 @@ def decode_access_token(token: str) -> dict[str, Any] | None:
         return None
 
     if payload.get("token_type") != "access":
+        return None
+
+    if not isinstance(payload.get("jti"), str) or not payload["jti"]:
         return None
 
     return payload

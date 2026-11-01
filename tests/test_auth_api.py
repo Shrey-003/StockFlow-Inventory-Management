@@ -1,6 +1,8 @@
 from sqlalchemy.orm import Session
+from datetime import datetime, timedelta, timezone
 
-from models import Reservation, User
+from models import Reservation, RevokedToken, User
+from security import decode_access_token, hash_token_identifier
 
 
 def create_test_product(client, sku="AUTH-TEST-001"):
@@ -343,3 +345,112 @@ def test_inactive_user_login_still_verifies_dummy_password(
     assert response.status_code == 401
     assert response.json()["detail"] == "Incorrect username or password."
     assert verification_hashes == [auth_routes.DUMMY_PASSWORD_HASH]
+
+def test_logout_revokes_current_token(client):
+    logout_response = client.post("/auth/logout")
+
+    assert logout_response.status_code == 204
+
+    protected_response = client.get("/products")
+
+    assert protected_response.status_code == 401
+
+
+def test_logout_revokes_only_current_session(
+    anonymous_client,
+    test_api_setup,
+):
+    credentials = {
+        "username": "testadmin",
+        "password": test_api_setup["passwords"]["admin"],
+    }
+
+    first_login = anonymous_client.post(
+        "/auth/login",
+        json=credentials,
+    )
+    second_login = anonymous_client.post(
+        "/auth/login",
+        json=credentials,
+    )
+
+    assert first_login.status_code == 200
+    assert second_login.status_code == 200
+
+    first_token = first_login.json()["access_token"]
+    second_token = second_login.json()["access_token"]
+
+    assert first_token != second_token
+
+    logout_response = anonymous_client.post(
+        "/auth/logout",
+        headers={"Authorization": f"Bearer {first_token}"},
+    )
+
+    assert logout_response.status_code == 204
+
+    first_session = anonymous_client.get(
+        "/auth/me",
+        headers={"Authorization": f"Bearer {first_token}"},
+    )
+
+    second_session = anonymous_client.get(
+        "/auth/me",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+
+    assert first_session.status_code == 401
+    assert second_session.status_code == 200
+
+
+def test_logout_requires_authentication(anonymous_client):
+    response = anonymous_client.post("/auth/logout")
+
+    assert response.status_code == 401
+
+def test_logout_stores_only_hashed_jti(client, test_engine):
+    authorization = client.headers["Authorization"]
+    token = authorization.removeprefix("Bearer ")
+
+    claims = decode_access_token(token)
+
+    assert claims is not None
+    assert claims["jti"]
+
+    response = client.post("/auth/logout")
+
+    assert response.status_code == 204
+
+    expected_hash = hash_token_identifier(claims["jti"])
+
+    with Session(test_engine) as db:
+        revoked_token = db.get(RevokedToken, expected_hash)
+
+        assert revoked_token is not None
+        assert revoked_token.jti_hash == expected_hash
+        assert revoked_token.jti_hash != claims["jti"]
+
+def test_logout_cleans_expired_revocation_records(
+    client,
+    test_engine,
+):
+    expired_hash = "f" * 64
+    now = datetime.now(timezone.utc)
+
+    with Session(test_engine) as db:
+        db.add(
+            RevokedToken(
+                jti_hash=expired_hash,
+                expires_at=now - timedelta(seconds=10),
+            )
+        )
+        db.commit()
+
+    response = client.post("/auth/logout")
+
+    assert response.status_code == 204
+
+    with Session(test_engine) as db:
+        expired_record = db.get(RevokedToken, expired_hash)
+
+    assert expired_record is None
