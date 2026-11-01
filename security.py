@@ -10,6 +10,10 @@ from config import settings
 
 password_hasher = PasswordHash.recommended()
 
+DUMMY_PASSWORD_HASH = password_hasher.hash(
+    "StockFlow-Dummy-Password-For-Unknown-Users"
+)
+
 JWT_ALGORITHM = "HS256"
 VALID_ROLES = {"admin", "staff"}
 

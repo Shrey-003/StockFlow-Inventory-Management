@@ -271,3 +271,75 @@ def test_login_rejects_short_wrong_password_as_unauthorized(
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Incorrect username or password."
+
+def test_unknown_user_login_still_verifies_password(
+    anonymous_client,
+    monkeypatch,
+):
+    import auth_routes
+
+    verification_calls = 0
+    original_verify_password = auth_routes.verify_password
+
+    def tracked_verify_password(password, password_hash):
+        nonlocal verification_calls
+        verification_calls += 1
+        return original_verify_password(password, password_hash)
+
+    monkeypatch.setattr(
+        auth_routes,
+        "verify_password",
+        tracked_verify_password,
+    )
+
+    response = anonymous_client.post(
+        "/auth/login",
+        json={
+            "username": "nonexistent_user",
+            "password": "Unknown-Password-2026!",
+        },
+    )
+
+    assert response.status_code == 401
+    assert verification_calls == 1
+
+def test_inactive_user_login_still_verifies_dummy_password(
+    anonymous_client,
+    monkeypatch,
+    test_engine,
+    test_api_setup,
+):
+    import auth_routes
+
+    user_id = test_api_setup["user_ids"]["staff"]
+
+    with Session(test_engine) as db:
+        user = db.get(User, user_id)
+        assert user is not None
+        user.is_active = False
+        db.commit()
+
+    verification_hashes = []
+    original_verify_password = auth_routes.verify_password
+
+    def tracked_verify_password(password, password_hash):
+        verification_hashes.append(password_hash)
+        return original_verify_password(password, password_hash)
+
+    monkeypatch.setattr(
+        auth_routes,
+        "verify_password",
+        tracked_verify_password,
+    )
+
+    response = anonymous_client.post(
+        "/auth/login",
+        json={
+            "username": "teststaff",
+            "password": "Inactive-Password-2026!",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Incorrect username or password."
+    assert verification_hashes == [auth_routes.DUMMY_PASSWORD_HASH]

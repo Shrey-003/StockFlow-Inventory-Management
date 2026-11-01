@@ -6,7 +6,11 @@ from auth_schemas import LoginRequest, TokenResponse, UserRead
 from config import settings
 from dependencies import get_current_user, get_db
 from models import User
-from security import create_access_token, verify_password
+from security import (
+    DUMMY_PASSWORD_HASH,
+    create_access_token,
+    verify_password,
+)
 
 
 router = APIRouter(
@@ -27,11 +31,16 @@ def login(
         select(User).where(User.username == payload.username)
     )
 
-    if (
-        user is None
-        or not user.is_active
-        or not verify_password(payload.password, user.password_hash)
-    ):
+    if user is None or not user.is_active:
+        verify_password(payload.password, DUMMY_PASSWORD_HASH)
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not verify_password(payload.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password.",
