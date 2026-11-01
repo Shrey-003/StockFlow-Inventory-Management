@@ -132,3 +132,28 @@ def test_access_token_rejects_empty_token():
 def test_access_token_rejects_invalid_claims(subject, role):
     with pytest.raises(ValueError):
         create_access_token(subject=subject, role=role)
+
+@pytest.mark.parametrize(
+    "missing_claim",
+    ["sub", "role", "token_type", "iat", "exp"],
+)
+def test_access_token_rejects_missing_required_claims(missing_claim):
+    now = datetime.now(timezone.utc)
+
+    payload = {
+        "sub": "42",
+        "role": "staff",
+        "token_type": "access",
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(minutes=5)).timestamp()),
+    }
+
+    payload.pop(missing_claim)
+
+    token = jwt.encode(
+        payload,
+        settings.jwt_secret_key,
+        algorithm=JWT_ALGORITHM,
+    )
+
+    assert decode_access_token(token) is None
