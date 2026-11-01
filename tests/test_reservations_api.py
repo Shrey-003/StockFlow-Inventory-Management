@@ -1,4 +1,4 @@
-﻿from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -131,7 +131,7 @@ def test_repeated_cancellation_does_not_restore_stock_twice(client):
     assert get_stock(client, product["id"]) == 10
 
 
-def test_expiration_restores_inventory(client, test_engine):
+def test_expiration_restores_inventory(client, worker_client, test_engine):
     product_response = client.post(
         "/products",
         json={
@@ -162,7 +162,7 @@ def test_expiration_restores_inventory(client, test_engine):
         )
         db.commit()
 
-    expiry_response = client.post("/reservations/expire-due")
+    expiry_response = worker_client.post("/reservations/expire-due")
     assert expiry_response.status_code == 200, expiry_response.text
 
     detail_response = client.get(f"/reservations/{reservation_id}")

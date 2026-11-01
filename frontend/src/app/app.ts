@@ -3,6 +3,9 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, NgZone, OnInit, inject, ChangeDetectorRef } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { finalize } from 'rxjs';
+import { AuthService } from './auth.service';
+import { AuthUser } from './auth-state.service';
+import { API_BASE_URL } from './api.constants';
 
 interface Product {
   id: number;
@@ -50,7 +53,19 @@ export class App implements OnInit {
   private readonly http = inject(HttpClient);
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly zone = inject(NgZone);
-  private readonly apiUrl = 'http://127.0.0.1:8000';
+  private readonly auth = inject(AuthService);
+  private readonly apiUrl = API_BASE_URL;
+
+  authReady = false;
+  currentUser: AuthUser | null = null;
+  loginUsername = '';
+  loginPassword = '';
+  loginError = '';
+  loginLoading = false;
+
+  get isAdmin(): boolean {
+    return this.currentUser?.role === 'admin';
+  }
 
   currentView: 'overview' | 'products' | 'reservations' = 'overview';
   reservations: Reservation[] = [];
@@ -78,8 +93,100 @@ export class App implements OnInit {
   form: ProductForm = this.emptyForm();
 
   ngOnInit(): void {
+    this.auth.currentUser$.subscribe(user => {
+      this.zone.run(() => {
+        const wasAuthenticated = this.currentUser !== null;
+        this.currentUser = user;
+
+        if (wasAuthenticated && user === null) {
+          this.resetSignedOutState();
+        }
+
+        this.cdr.detectChanges();
+      });
+    });
+
+    this.auth.restoreSession().subscribe(user => {
+      this.zone.run(() => {
+        this.currentUser = user;
+        this.authReady = true;
+
+        if (user) {
+          this.initializeDashboard();
+        } else {
+          this.loading = false;
+        }
+
+        this.cdr.detectChanges();
+      });
+    });
+  }
+
+  private initializeDashboard(): void {
     this.checkHealth();
     this.loadProducts();
+  }
+
+  private resetSignedOutState(): void {
+    this.products = [];
+    this.reservations = [];
+    this.loading = false;
+    this.reservationsLoading = false;
+    this.apiConnected = false;
+    this.showForm = false;
+    this.showReservationForm = false;
+    this.editingProductId = null;
+    this.currentView = 'overview';
+    this.errorMessage = '';
+    this.successMessage = '';
+    this.reservationError = '';
+    this.reservationSuccess = '';
+    this.loginPassword = '';
+  }
+
+  login(): void {
+    if (this.loginLoading) {
+      return;
+    }
+
+    const username = this.loginUsername.trim();
+    const password = this.loginPassword;
+
+    if (!username || !password) {
+      this.loginError = 'Enter your username and password.';
+      return;
+    }
+
+    this.loginLoading = true;
+    this.loginError = '';
+
+    this.auth.login(username, password).pipe(
+      finalize(() => this.zone.run(() => {
+        this.loginLoading = false;
+        this.cdr.detectChanges();
+      })),
+    ).subscribe({
+      next: user => this.zone.run(() => {
+        this.currentUser = user;
+        this.loginPassword = '';
+        this.loginError = '';
+        this.currentView = 'overview';
+        this.initializeDashboard();
+        this.cdr.detectChanges();
+      }),
+      error: (error: HttpErrorResponse) => this.zone.run(() => {
+        this.loginError = error.status === 401 || error.status === 422
+          ? 'Invalid username or password.'
+          : this.describeError(error);
+        this.cdr.detectChanges();
+      }),
+    });
+  }
+
+  logout(): void {
+    this.auth.logout();
+    this.loginPassword = '';
+    this.loginError = '';
   }
 
   get filteredProducts(): Product[] {

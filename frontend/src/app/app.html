@@ -1,4 +1,69 @@
-<div class="layout">
+<section class="auth-loading" *ngIf="!authReady">
+  <div class="login-brand-mark">SF</div>
+  <p>Loading StockFlow...</p>
+</section>
+
+<section class="login-screen" *ngIf="authReady && !currentUser">
+  <div class="login-panel">
+    <div class="login-brand">
+      <div class="login-brand-mark">SF</div>
+      <div>
+        <strong>StockFlow</strong>
+        <small>INVENTORY CONTROL</small>
+      </div>
+    </div>
+
+    <div class="login-heading">
+      <div class="eyebrow">SECURE WORKSPACE</div>
+      <h1>Welcome back</h1>
+      <p>Sign in to manage inventory and reservations.</p>
+    </div>
+
+    <form class="login-form" (ngSubmit)="login()">
+      <label>
+        Username
+        <input
+          type="text"
+          name="username"
+          [(ngModel)]="loginUsername"
+          autocomplete="username"
+          maxlength="64"
+          required
+          placeholder="Enter your username" />
+      </label>
+
+      <label>
+        Password
+        <input
+          type="password"
+          name="password"
+          [(ngModel)]="loginPassword"
+          autocomplete="current-password"
+          minlength="12"
+          maxlength="128"
+          required
+          placeholder="Enter your password" />
+      </label>
+
+      <div class="login-error" *ngIf="loginError" role="alert">
+        {{ loginError }}
+      </div>
+
+      <button
+        class="login-submit"
+        type="submit"
+        [disabled]="loginLoading || !loginUsername.trim() || !loginPassword">
+        {{ loginLoading ? 'Signing in...' : 'Sign in' }}
+      </button>
+    </form>
+
+    <p class="login-security-note">
+      Authorized StockFlow users only.
+    </p>
+  </div>
+</section>
+
+<div class="layout" *ngIf="authReady && currentUser">
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-logo">SF</div>
@@ -6,6 +71,23 @@
         <strong>StockFlow</strong>
         <small>INVENTORY CONTROL</small>
       </div>
+    </div>
+
+    <div class="sidebar-account" *ngIf="currentUser">
+      <div class="sidebar-account-avatar">
+        {{ currentUser.username.substring(0, 1).toUpperCase() }}
+      </div>
+      <div class="sidebar-account-details">
+        <strong>{{ currentUser.username }}</strong>
+        <small>{{ currentUser.role }}</small>
+      </div>
+      <button
+        type="button"
+        class="sidebar-logout"
+        (click)="logout()"
+        aria-label="Sign out">
+        Sign out
+      </button>
     </div>
 
     <div class="nav-label">WORKSPACE</div>
@@ -38,7 +120,11 @@
           (click)="refresh()" [disabled]="loading">
           ↻ Refresh
         </button>
-        <button class="btn primary" type="button" (click)="openForm()">
+        <button
+          *ngIf="isAdmin"
+          class="btn primary"
+          type="button"
+          (click)="openForm()">
           + Add product
         </button>
       </div>
@@ -125,16 +211,16 @@
                 <th class="right">STOCK</th>
                 <th>STATUS</th>
                 <th>LAST UPDATED</th>
-              <th>ACTIONS</th>
+              <th *ngIf="isAdmin">ACTIONS</th>
               </tr>
             </thead>
             <tbody>
               <tr *ngIf="loading">
-                <td colspan="7" class="empty">Loading products...</td>
+                <td [attr.colspan]="isAdmin ? 7 : 6" class="empty">Loading products...</td>
               </tr>
 
               <tr *ngIf="!loading && filteredProducts.length === 0">
-                <td colspan="6" class="empty">
+                <td [attr.colspan]="isAdmin ? 7 : 6" class="empty">
                   {{ searchTerm ? 'No products match your search.' : 'No products found.' }}
                 </td>
               </tr>
@@ -165,7 +251,7 @@
                 <td class="date">
                   {{ product.updated_at | date:'MMM d, y, h:mm a' }}
                 </td>
-                <td>
+                <td *ngIf="isAdmin">
                   <div class="row-actions">
                     <button type="button" class="row-action" (click)="editProduct(product)" [attr.aria-label]="'Edit ' + product.name">Edit</button>
                     <button type="button" class="row-action danger-action" (click)="deleteProduct(product)" [attr.aria-label]="'Delete ' + product.name">Delete</button>
@@ -379,7 +465,7 @@
   </main>
 </div>
 
-<div class="backdrop" *ngIf="showForm" (click)="closeForm()">
+<div class="backdrop" *ngIf="showForm && isAdmin" (click)="closeForm()">
   <section class="modal" role="dialog" aria-modal="true"
     aria-labelledby="form-title" (click)="$event.stopPropagation()">
 

@@ -1,0 +1,134 @@
+from datetime import datetime, timedelta, timezone
+
+import jwt
+import pytest
+
+from config import settings
+from security import (
+    JWT_ALGORITHM,
+    create_access_token,
+    decode_access_token,
+    hash_password,
+    verify_password,
+)
+
+
+def test_password_hash_and_verification():
+    password = "StockFlow-Strong-Password-2026"
+
+    hashed = hash_password(password)
+
+    assert hashed != password
+    assert verify_password(password, hashed)
+    assert not verify_password("Wrong-Password-2026", hashed)
+
+
+@pytest.mark.parametrize(
+    "password",
+    [
+        "",
+        "short",
+        "a" * 129,
+    ],
+)
+def test_hash_password_rejects_invalid_length(password):
+    with pytest.raises(ValueError):
+        hash_password(password)
+
+
+def test_access_token_creation_and_validation():
+    token = create_access_token(
+        subject="42",
+        role="admin",
+    )
+
+    claims = decode_access_token(token)
+
+    assert claims is not None
+    assert claims["sub"] == "42"
+    assert claims["role"] == "admin"
+    assert claims["token_type"] == "access"
+    assert claims["exp"] > claims["iat"]
+
+
+def test_access_token_rejects_tampering():
+    token = create_access_token(
+        subject="42",
+        role="staff",
+    )
+
+    tampered_token = token[:-1] + (
+        "A" if token[-1] != "A" else "B"
+    )
+
+    assert decode_access_token(tampered_token) is None
+
+
+def test_access_token_rejects_expired_token():
+    now = datetime.now(timezone.utc)
+
+    expired_token = jwt.encode(
+        {
+            "sub": "42",
+            "role": "staff",
+            "token_type": "access",
+            "iat": int((now - timedelta(minutes=10)).timestamp()),
+            "exp": int((now - timedelta(minutes=5)).timestamp()),
+        },
+        settings.jwt_secret_key,
+        algorithm=JWT_ALGORITHM,
+    )
+
+    assert decode_access_token(expired_token) is None
+
+
+def test_access_token_rejects_invalid_role():
+    now = datetime.now(timezone.utc)
+
+    invalid_role_token = jwt.encode(
+        {
+            "sub": "42",
+            "role": "superuser",
+            "token_type": "access",
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(minutes=5)).timestamp()),
+        },
+        settings.jwt_secret_key,
+        algorithm=JWT_ALGORITHM,
+    )
+
+    assert decode_access_token(invalid_role_token) is None
+
+
+def test_access_token_rejects_wrong_token_type():
+    now = datetime.now(timezone.utc)
+
+    wrong_type_token = jwt.encode(
+        {
+            "sub": "42",
+            "role": "staff",
+            "token_type": "refresh",
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(minutes=5)).timestamp()),
+        },
+        settings.jwt_secret_key,
+        algorithm=JWT_ALGORITHM,
+    )
+
+    assert decode_access_token(wrong_type_token) is None
+
+
+def test_access_token_rejects_empty_token():
+    assert decode_access_token("") is None
+
+
+@pytest.mark.parametrize(
+    ("subject", "role"),
+    [
+        ("", "admin"),
+        ("42", "superuser"),
+    ],
+)
+def test_access_token_rejects_invalid_claims(subject, role):
+    with pytest.raises(ValueError):
+        create_access_token(subject=subject, role=role)

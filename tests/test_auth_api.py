@@ -1,0 +1,273 @@
+from sqlalchemy.orm import Session
+
+from models import Reservation, User
+
+
+def create_test_product(client, sku="AUTH-TEST-001"):
+    response = client.post(
+        "/products",
+        json={
+            "name": "Authentication Test Product",
+            "sku": sku,
+            "price": "20.00",
+            "stock_quantity": 20,
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_login_returns_access_token_and_current_user(
+    anonymous_client,
+    test_api_setup,
+):
+    response = anonymous_client.post(
+        "/auth/login",
+        json={
+            "username": "testadmin",
+            "password": test_api_setup["passwords"]["admin"],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    token_data = response.json()
+
+    assert token_data["token_type"] == "bearer"
+    assert token_data["access_token"]
+    assert token_data["expires_in"] == 1800
+
+    me_response = anonymous_client.get(
+        "/auth/me",
+        headers={
+            "Authorization": f"Bearer {token_data['access_token']}"
+        },
+    )
+
+    assert me_response.status_code == 200
+    user_data = me_response.json()
+
+    assert user_data["username"] == "testadmin"
+    assert user_data["role"] == "admin"
+    assert "password_hash" not in user_data
+
+
+def test_login_rejects_invalid_credentials(
+    anonymous_client,
+    test_api_setup,
+):
+    response = anonymous_client.post(
+        "/auth/login",
+        json={
+            "username": "testadmin",
+            "password": "Incorrect-Password-2026!",
+        },
+    )
+
+    assert response.status_code == 401
+
+
+def test_login_rejects_unknown_user(anonymous_client):
+    response = anonymous_client.post(
+        "/auth/login",
+        json={
+            "username": "unknownuser",
+            "password": "Unknown-Password-2026!",
+        },
+    )
+
+    assert response.status_code == 401
+
+
+def test_anonymous_users_cannot_access_protected_routes(
+    anonymous_client,
+):
+    assert anonymous_client.get("/health").status_code == 200
+    assert anonymous_client.get("/products").status_code == 401
+    assert anonymous_client.get("/reservations").status_code == 401
+    assert anonymous_client.get("/auth/me").status_code == 401
+
+    response = anonymous_client.post(
+        "/products",
+        json={
+            "name": "Unauthorized Product",
+            "sku": "AUTH-UNAUTH-001",
+            "price": "10.00",
+            "stock_quantity": 1,
+        },
+    )
+
+    assert response.status_code == 401
+
+
+def test_staff_can_view_products_but_cannot_manage_them(
+    client,
+    staff_client,
+):
+    product = create_test_product(client, sku="AUTH-ROLE-001")
+    product_id = product["id"]
+
+    assert staff_client.get("/products").status_code == 200
+    assert staff_client.get(
+        f"/products/{product_id}"
+    ).status_code == 200
+
+    response = staff_client.post(
+        "/products",
+        json={
+            "name": "Staff Product",
+            "sku": "AUTH-ROLE-002",
+            "price": "10.00",
+            "stock_quantity": 1,
+        },
+    )
+    assert response.status_code == 403
+
+    response = staff_client.patch(
+        f"/products/{product_id}",
+        json={"price": "25.00"},
+    )
+    assert response.status_code == 403
+
+    response = staff_client.delete(f"/products/{product_id}")
+    assert response.status_code == 403
+
+    assert client.get(f"/products/{product_id}").status_code == 200
+
+
+def test_staff_can_only_view_and_cancel_own_reservations(
+    client,
+    staff_client,
+    other_staff_client,
+    test_engine,
+    test_api_setup,
+):
+    product = create_test_product(client, sku="AUTH-OWNER-001")
+
+    response = staff_client.post(
+        f"/products/{product['id']}/reservations",
+        json={"quantity": 2, "ttl_minutes": 15},
+    )
+
+    assert response.status_code == 201, response.text
+    reservation_id = response.json()["id"]
+
+    with Session(test_engine) as db:
+        reservation = db.get(Reservation, reservation_id)
+        assert reservation is not None
+        assert reservation.user_id == test_api_setup["user_ids"]["staff"]
+
+    own_list = staff_client.get("/reservations")
+    assert own_list.status_code == 200
+    assert [r["id"] for r in own_list.json()] == [reservation_id]
+
+    other_list = other_staff_client.get("/reservations")
+    assert other_list.status_code == 200
+    assert other_list.json() == []
+
+    assert staff_client.get(
+        f"/reservations/{reservation_id}"
+    ).status_code == 200
+
+    assert other_staff_client.get(
+        f"/reservations/{reservation_id}"
+    ).status_code == 404
+
+    assert other_staff_client.post(
+        f"/reservations/{reservation_id}/cancel"
+    ).status_code == 404
+
+    own_cancel = staff_client.post(
+        f"/reservations/{reservation_id}/cancel"
+    )
+    assert own_cancel.status_code == 200
+    assert own_cancel.json()["status"] == "cancelled"
+
+    assert client.get(
+        f"/reservations/{reservation_id}"
+    ).status_code == 200
+
+    admin_list = client.get("/reservations")
+    assert reservation_id in [
+        item["id"] for item in admin_list.json()
+    ]
+
+
+def test_admin_can_cancel_another_users_reservation(
+    client,
+    staff_client,
+):
+    product = create_test_product(
+        client,
+        sku="AUTH-ADMIN-CANCEL-001",
+    )
+
+    response = staff_client.post(
+        f"/products/{product['id']}/reservations",
+        json={"quantity": 1, "ttl_minutes": 15},
+    )
+
+    assert response.status_code == 201
+    reservation_id = response.json()["id"]
+
+    response = client.post(
+        f"/reservations/{reservation_id}/cancel"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+
+
+def test_inactive_user_cannot_use_existing_token(
+    staff_client,
+    test_engine,
+    test_api_setup,
+):
+    user_id = test_api_setup["user_ids"]["staff"]
+
+    with Session(test_engine) as db:
+        user = db.get(User, user_id)
+        assert user is not None
+        user.is_active = False
+        db.commit()
+
+    response = staff_client.get("/products")
+    assert response.status_code == 401
+
+
+def test_worker_endpoint_rejects_missing_and_invalid_tokens(
+    anonymous_client,
+    worker_client,
+):
+    response = anonymous_client.post("/reservations/expire-due")
+    assert response.status_code == 401
+
+    response = anonymous_client.post(
+        "/reservations/expire-due",
+        headers={"X-Worker-Token": "incorrect-worker-token"},
+    )
+    assert response.status_code == 401
+
+    response = worker_client.post("/reservations/expire-due")
+    assert response.status_code == 200
+    assert response.json() == {"expired_count": 0}
+
+
+def test_admin_jwt_cannot_replace_worker_token(client):
+    response = client.post("/reservations/expire-due")
+    assert response.status_code == 401
+
+def test_login_rejects_short_wrong_password_as_unauthorized(
+    anonymous_client,
+    test_api_setup,
+):
+    response = anonymous_client.post(
+        "/auth/login",
+        json={
+            "username": "testadmin",
+            "password": "wrong",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Incorrect username or password."

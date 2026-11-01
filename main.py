@@ -9,8 +9,15 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from config import settings
-from database import SessionLocal, engine
-from models import Product, Reservation
+from auth_routes import router as auth_router
+from database import engine
+from dependencies import (
+    get_current_user,
+    get_db,
+    require_roles,
+    verify_worker_token,
+)
+from models import Product, Reservation, User
 from schemas import (
     ProductRead,
     ProductUpdate,
@@ -39,13 +46,7 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization"],
 )
 
-
-def get_db() -> Generator[Session, None, None]:
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+app.include_router(auth_router)
 
 
 def commit_changes(db: Session) -> None:
@@ -101,6 +102,7 @@ def database_health_check() -> dict[str, str]:
 )
 def create_product(
     payload: ProductWrite,
+    current_user: User = Depends(require_roles("admin")),
     db: Session = Depends(get_db),
 ) -> Product:
     product = Product(**payload.model_dump())
@@ -118,6 +120,7 @@ def create_product(
 def list_products(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[Product]:
     return (
@@ -136,6 +139,7 @@ def list_products(
 )
 def get_product(
     product_id: int,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Product:
     product = db.get(Product, product_id)
@@ -157,6 +161,7 @@ def get_product(
 def update_product(
     product_id: int,
     payload: ProductUpdate,
+    current_user: User = Depends(require_roles("admin")),
     db: Session = Depends(get_db),
 ) -> Product:
     product = db.get(Product, product_id)
@@ -184,6 +189,7 @@ def update_product(
 )
 def delete_product(
     product_id: int,
+    current_user: User = Depends(require_roles("admin")),
     db: Session = Depends(get_db),
 ) -> Response:
     product = db.get(Product, product_id)
@@ -208,7 +214,8 @@ def delete_product(
 def reserve_inventory(
     product_id: int,
     payload: ReservationCreate,
-    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("admin", "staff")),
+    db: Session = Depends(get_db, use_cache=False),
 ) -> Reservation:
     try:
         with db.begin():
@@ -246,6 +253,7 @@ def reserve_inventory(
 
             reservation = Reservation(
                 product_id=product_id,
+                user_id=current_user.id,
                 quantity=payload.quantity,
                 status="active",
                 expires_at=(
@@ -276,7 +284,8 @@ def reserve_inventory(
 )
 def cancel_reservation(
     reservation_id: int,
-    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db, use_cache=False),
 ) -> Reservation:
     try:
         with db.begin():
@@ -288,6 +297,15 @@ def cancel_reservation(
             )
 
             if reservation is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Reservation not found.",
+                )
+
+            if (
+                current_user.role != "admin"
+                and reservation.user_id != current_user.id
+            ):
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Reservation not found.",
@@ -339,10 +357,16 @@ def cancel_reservation(
 def list_reservations(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[Reservation]:
+    query = select(Reservation)
+
+    if current_user.role != "admin":
+        query = query.where(Reservation.user_id == current_user.id)
+
     return db.scalars(
-        select(Reservation)
+        query
         .order_by(
             Reservation.created_at.desc(),
             Reservation.id.desc(),
@@ -359,11 +383,15 @@ def list_reservations(
 )
 def get_reservation(
     reservation_id: int,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Reservation:
     reservation = db.get(Reservation, reservation_id)
 
-    if reservation is None:
+    if reservation is None or (
+        current_user.role != "admin"
+        and reservation.user_id != current_user.id
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Reservation not found.",
@@ -377,6 +405,7 @@ def get_reservation(
     tags=["Reservations"],
 )
 def expire_due_reservations(
+    worker_authorized: None = Depends(verify_worker_token),
     db: Session = Depends(get_db),
 ) -> dict[str, int]:
     expired_count = 0

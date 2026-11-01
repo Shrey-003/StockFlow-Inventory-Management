@@ -1,8 +1,10 @@
-﻿import json
+import json
 import logging
 import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+from config import settings
 
 API_URL = "http://127.0.0.1:8000/reservations/expire-due"
 INTERVAL_SECONDS = 30
@@ -17,7 +19,11 @@ logger = logging.getLogger("stockflow.expiry_worker")
 
 
 def process_expired_reservations() -> None:
-    request = Request(API_URL, method="POST")
+    request = Request(
+        API_URL,
+        method="POST",
+        headers={"X-Worker-Token": settings.worker_api_token},
+    )
 
     try:
         with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:

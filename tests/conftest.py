@@ -1,4 +1,4 @@
-﻿import os
+import os
 from pathlib import Path
 
 import pytest
@@ -9,6 +9,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session
+
+from config import settings
+from models import Base, User
+from security import create_access_token, hash_password
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -38,7 +42,6 @@ def run_test_migration(engine, operation, revision: str) -> None:
     """Execute an Alembic migration against the verified test database."""
 
     verify_test_database(engine)
-
     config = Config(str(PROJECT_ROOT / "alembic.ini"))
 
     with engine.connect() as connection:
@@ -51,15 +54,11 @@ def run_test_migration(engine, operation, revision: str) -> None:
                 "Database identity changed. Migration cancelled."
             )
 
-        # End the read transaction before handing the connection to Alembic.
         connection.commit()
-
         config.attributes["connection"] = connection
 
         try:
             operation(config, revision)
-
-            # Ensure any remaining migration transaction is committed.
             connection.commit()
         except Exception:
             connection.rollback()
@@ -72,7 +71,6 @@ def reset_test_schema(engine) -> None:
     """Recreate the test schema through Alembic migrations."""
 
     verify_test_database(engine)
-
     print("\nResetting isolated test database through Alembic...")
 
     run_test_migration(engine, command.downgrade, "base")
@@ -128,11 +126,7 @@ def test_engine():
 
     try:
         verify_test_database(engine)
-
-        print(
-            f"\nIntegration tests use database: {TEST_DATABASE_NAME}"
-        )
-
+        print(f"\nIntegration tests use database: {TEST_DATABASE_NAME}")
         yield engine
 
     finally:
@@ -144,10 +138,13 @@ def test_engine():
 
 
 @pytest.fixture
-def client(test_engine):
+def test_api_setup(test_engine):
+    """Reset the test DB, override DB sessions and seed test identities."""
+
     reset_test_schema(test_engine)
 
-    from main import app, get_db
+    from main import app
+    from dependencies import get_db
 
     def override_get_db():
         with Session(test_engine) as db:
@@ -155,8 +152,106 @@ def client(test_engine):
 
     app.dependency_overrides[get_db] = override_get_db
 
+    passwords = {
+        "admin": "TestAdmin-Password-2026!",
+        "staff": "TestStaff-Password-2026!",
+        "other_staff": "OtherStaff-Password-2026!",
+    }
+
+    users = {
+        "admin": User(
+            username="testadmin",
+            password_hash=hash_password(passwords["admin"]),
+            role="admin",
+            is_active=True,
+        ),
+        "staff": User(
+            username="teststaff",
+            password_hash=hash_password(passwords["staff"]),
+            role="staff",
+            is_active=True,
+        ),
+        "other_staff": User(
+            username="otherstaff",
+            password_hash=hash_password(passwords["other_staff"]),
+            role="staff",
+            is_active=True,
+        ),
+    }
+
     try:
-        with TestClient(app) as test_client:
-            yield test_client
+        with Session(test_engine) as db:
+            db.add_all(users.values())
+            db.commit()
+
+            user_ids = {
+                key: user.id
+                for key, user in users.items()
+            }
+
+        tokens = {
+            key: create_access_token(
+                subject=str(user_ids[key]),
+                role=users[key].role,
+            )
+            for key in users
+        }
+
+        headers = {
+            key: {"Authorization": f"Bearer {token}"}
+            for key, token in tokens.items()
+        }
+
+        yield {
+            "app": app,
+            "passwords": passwords,
+            "user_ids": user_ids,
+            "headers": headers,
+        }
+
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.fixture
+def client(test_api_setup):
+    """Default authenticated admin client for existing API tests."""
+
+    with TestClient(test_api_setup["app"]) as test_client:
+        test_client.headers.update(
+            test_api_setup["headers"]["admin"]
+        )
+        yield test_client
+
+
+@pytest.fixture
+def staff_client(test_api_setup):
+    with TestClient(test_api_setup["app"]) as test_client:
+        test_client.headers.update(
+            test_api_setup["headers"]["staff"]
+        )
+        yield test_client
+
+
+@pytest.fixture
+def other_staff_client(test_api_setup):
+    with TestClient(test_api_setup["app"]) as test_client:
+        test_client.headers.update(
+            test_api_setup["headers"]["other_staff"]
+        )
+        yield test_client
+
+
+@pytest.fixture
+def anonymous_client(test_api_setup):
+    with TestClient(test_api_setup["app"]) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def worker_client(test_api_setup):
+    with TestClient(test_api_setup["app"]) as test_client:
+        test_client.headers.update(
+            {"X-Worker-Token": settings.worker_api_token}
+        )
+        yield test_client
