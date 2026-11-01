@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from auth_schemas import LoginRequest, TokenResponse, UserRead
 from config import settings
 from dependencies import get_current_user, get_db
+from login_rate_limiter import enforce_login_rate_limit
 from models import User
 from security import (
     DUMMY_PASSWORD_HASH,
@@ -25,8 +27,24 @@ router = APIRouter(
 )
 def login(
     payload: LoginRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> TokenResponse:
+    # Use the direct client address. Do not trust arbitrary forwarded
+    # headers unless the deployment explicitly configures trusted proxies.
+    client_ip = (
+        request.client.host
+        if request.client is not None
+        else "unknown"
+    )
+
+    # Apply rate limits before checking credentials.
+    enforce_login_rate_limit(
+        db,
+        client_ip,
+        payload.username,
+    )
+
     user = db.scalar(
         select(User).where(User.username == payload.username)
     )

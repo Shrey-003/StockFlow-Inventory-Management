@@ -128,6 +128,32 @@ class User(Base):
         onupdate=func.now(),
     )
 
+class LoginRateLimit(Base):
+    __tablename__ = "login_rate_limits"
+
+    __table_args__ = (
+        CheckConstraint(
+            "request_count > 0",
+            name="ck_login_rate_limits_request_count_positive",
+        ),
+    )
+
+    bucket_hash: Mapped[str] = mapped_column(
+        String(64),
+        primary_key=True,
+    )
+
+    window_started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+
+    request_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
 
 class Reservation(Base):
     __tablename__ = "reservations"

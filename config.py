@@ -1,3 +1,4 @@
+
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -40,6 +41,15 @@ def get_required_secret(name: str) -> str:
         )
 
     return value
+
+
+def get_integer_setting(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError as exc:
+        raise RuntimeError(
+            f"{name} must be a valid integer."
+        ) from exc
 
 
 def get_cors_origins() -> tuple[str, ...]:
@@ -89,6 +99,10 @@ class Settings:
     cors_origins: tuple[str, ...]
     jwt_secret_key: str
     worker_api_token: str
+    login_rate_limit_secret: str
+    login_rate_limit_window_seconds: int
+    login_rate_limit_ip_username_max_attempts: int
+    login_rate_limit_ip_max_attempts: int
     access_token_expire_minutes: int
 
     @classmethod
@@ -119,6 +133,44 @@ class Settings:
                 "ACCESS_TOKEN_EXPIRE_MINUTES must be between 1 and 1440."
             )
 
+        # Login rate-limit configuration.
+        login_rate_limit_secret = get_required_secret(
+            "LOGIN_RATE_LIMIT_SECRET"
+        )
+
+        rate_limit_window = get_integer_setting(
+            "LOGIN_RATE_LIMIT_WINDOW_SECONDS", 900
+        )
+
+        ip_username_max_attempts = get_integer_setting(
+            "LOGIN_RATE_LIMIT_IP_USERNAME_MAX_ATTEMPTS", 10
+        )
+
+        ip_max_attempts = get_integer_setting(
+            "LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS", 60
+        )
+
+        if not 60 <= rate_limit_window <= 86400:
+            raise RuntimeError(
+                "LOGIN_RATE_LIMIT_WINDOW_SECONDS must be between 60 and 86400."
+            )
+
+        if not 1 <= ip_username_max_attempts <= 100:
+            raise RuntimeError(
+                "LOGIN_RATE_LIMIT_IP_USERNAME_MAX_ATTEMPTS must be between 1 and 100."
+            )
+
+        if not 1 <= ip_max_attempts <= 1000:
+            raise RuntimeError(
+                "LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS must be between 1 and 1000."
+            )
+
+        if ip_max_attempts < ip_username_max_attempts:
+            raise RuntimeError(
+                "LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS must be greater than "
+                "or equal to LOGIN_RATE_LIMIT_IP_USERNAME_MAX_ATTEMPTS."
+            )
+
         return cls(
             db_host=get_required_setting("DB_HOST"),
             db_port=db_port,
@@ -128,6 +180,10 @@ class Settings:
             cors_origins=get_cors_origins(),
             jwt_secret_key=get_required_secret("JWT_SECRET_KEY"),
             worker_api_token=get_required_secret("WORKER_API_TOKEN"),
+            login_rate_limit_secret=login_rate_limit_secret,
+            login_rate_limit_window_seconds=rate_limit_window,
+            login_rate_limit_ip_username_max_attempts=ip_username_max_attempts,
+            login_rate_limit_ip_max_attempts=ip_max_attempts,
             access_token_expire_minutes=token_expiry,
         )
 

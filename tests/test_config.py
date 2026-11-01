@@ -4,6 +4,10 @@ from config import Settings, get_cors_origins
 
 
 def set_valid_database_environment(monkeypatch):
+    monkeypatch.setenv(
+	"LOGIN_RATE_LIMIT_SECRET",
+	"test-login-rate-limit-secret-that-is-long-enough-012345",
+    )
     monkeypatch.setenv("DB_HOST", "127.0.0.1")
     monkeypatch.setenv("DB_PORT", "5432")
     monkeypatch.setenv("DB_NAME", "stockflow_test")
@@ -26,6 +30,11 @@ def test_settings_load_valid_configuration(monkeypatch):
         "http://localhost:4200,https://stockflow.example.com",
     )
     monkeypatch.setenv("ACCESS_TOKEN_EXPIRE_MINUTES", "45")
+    monkeypatch.setenv("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "900")
+    monkeypatch.setenv(
+        "LOGIN_RATE_LIMIT_IP_USERNAME_MAX_ATTEMPTS", "10"
+    )
+    monkeypatch.setenv("LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS", "60")
 
     settings = Settings.from_environment()
 
@@ -41,6 +50,9 @@ def test_settings_load_valid_configuration(monkeypatch):
     assert settings.jwt_secret_key.startswith("test-jwt-secret")
     assert settings.worker_api_token.startswith("test-worker-token")
     assert settings.access_token_expire_minutes == 45
+    assert settings.login_rate_limit_window_seconds == 900
+    assert settings.login_rate_limit_ip_username_max_attempts == 10
+    assert settings.login_rate_limit_ip_max_attempts == 60
 
 
 def test_settings_reject_missing_database_setting(monkeypatch):
@@ -157,3 +169,78 @@ def test_settings_default_token_expiry(monkeypatch):
     settings = Settings.from_environment()
 
     assert settings.access_token_expire_minutes == 30
+
+@pytest.mark.parametrize(
+    "setting",
+    [
+        "LOGIN_RATE_LIMIT_SECRET",
+    ],
+)
+def test_settings_reject_missing_rate_limit_secret(monkeypatch, setting):
+    set_valid_database_environment(monkeypatch)
+    monkeypatch.delenv(setting)
+
+    with pytest.raises(RuntimeError, match=setting):
+        Settings.from_environment()
+
+
+def test_settings_reject_short_rate_limit_secret(monkeypatch):
+    set_valid_database_environment(monkeypatch)
+    monkeypatch.setenv("LOGIN_RATE_LIMIT_SECRET", "too-short")
+
+    with pytest.raises(RuntimeError, match="at least 32 characters"):
+        Settings.from_environment()
+
+
+@pytest.mark.parametrize(
+    ("setting", "value"),
+    [
+        ("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "not-a-number"),
+        ("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "59"),
+        ("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "86401"),
+        ("LOGIN_RATE_LIMIT_IP_USERNAME_MAX_ATTEMPTS", "0"),
+        ("LOGIN_RATE_LIMIT_IP_USERNAME_MAX_ATTEMPTS", "101"),
+        ("LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS", "0"),
+        ("LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS", "1001"),
+    ],
+)
+def test_settings_reject_invalid_rate_limit_values(
+    monkeypatch,
+    setting,
+    value,
+):
+    set_valid_database_environment(monkeypatch)
+    monkeypatch.setenv(setting, value)
+
+    with pytest.raises(RuntimeError, match=setting):
+        Settings.from_environment()
+
+
+def test_settings_reject_ip_limit_lower_than_username_limit(monkeypatch):
+    set_valid_database_environment(monkeypatch)
+    monkeypatch.setenv(
+        "LOGIN_RATE_LIMIT_IP_USERNAME_MAX_ATTEMPTS", "20"
+    )
+    monkeypatch.setenv("LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS", "10")
+
+    with pytest.raises(RuntimeError, match="IP_MAX_ATTEMPTS"):
+        Settings.from_environment()
+
+def test_settings_default_login_rate_limits(monkeypatch):
+    set_valid_database_environment(monkeypatch)
+
+    monkeypatch.delenv("LOGIN_RATE_LIMIT_WINDOW_SECONDS", raising=False)
+    monkeypatch.delenv(
+        "LOGIN_RATE_LIMIT_IP_USERNAME_MAX_ATTEMPTS",
+        raising=False,
+    )
+    monkeypatch.delenv(
+        "LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS",
+        raising=False,
+    )
+
+    settings = Settings.from_environment()
+
+    assert settings.login_rate_limit_window_seconds == 900
+    assert settings.login_rate_limit_ip_username_max_attempts == 10
+    assert settings.login_rate_limit_ip_max_attempts == 60
