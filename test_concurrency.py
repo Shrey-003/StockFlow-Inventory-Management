@@ -1,6 +1,7 @@
 ﻿import json
 import sys
 import threading
+from getpass import getpass
 from concurrent.futures import ThreadPoolExecutor
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -11,6 +12,8 @@ INITIAL_STOCK = 10
 REQUEST_COUNT = 5
 QUANTITY_PER_REQUEST = 3
 
+
+ACCESS_TOKEN = ""
 
 def read_json_response(raw):
     if not raw:
@@ -24,7 +27,11 @@ def read_json_response(raw):
 
 def api_request(method, path, payload=None):
     data = None
-    headers = {}
+    headers = (
+        {"Authorization": f"Bearer {ACCESS_TOKEN}"}
+        if ACCESS_TOKEN
+        else {}
+    )
 
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
@@ -58,6 +65,15 @@ def reserve_at_same_time(barrier):
 
 
 def main():
+    global ACCESS_TOKEN
+
+    ACCESS_TOKEN = getpass(
+        "Enter the current staff JWT (input hidden): "
+    ).strip()
+
+    if not ACCESS_TOKEN:
+        print("ERROR: No access token provided.")
+        sys.exit(1)
     reservation_ids = []
     passed = False
     final_stock = None

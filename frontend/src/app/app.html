@@ -534,14 +534,14 @@
           (click)="reservationSuccess = ''"
           aria-label="Dismiss success message"
         >
-          ?
+          &times;
         </button>
       </div>
 
       <div class="reservation-notice reservation-error" *ngIf="reservationError" role="alert">
         {{ reservationError }}
         <button type="button" (click)="reservationError = ''" aria-label="Dismiss error message">
-          ?
+          &times;
         </button>
       </div>
 
@@ -646,7 +646,9 @@
           <span class="reservation-count">{{ reservations.length }} records</span>
         </div>
 
-        <div class="reservation-loading" *ngIf="reservationsLoading">Loading reservations?</div>
+        <div class="reservation-loading" *ngIf="reservationsLoading">
+          Loading reservations...
+        </div>
 
         <div class="reservation-table-wrap" *ngIf="!reservationsLoading">
           <table class="reservation-table">

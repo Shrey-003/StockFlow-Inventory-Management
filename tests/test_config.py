@@ -8,6 +8,7 @@ def set_valid_database_environment(monkeypatch):
 	"LOGIN_RATE_LIMIT_SECRET",
 	"test-login-rate-limit-secret-that-is-long-enough-012345",
     )
+    monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("DB_HOST", "127.0.0.1")
     monkeypatch.setenv("DB_PORT", "5432")
     monkeypatch.setenv("DB_NAME", "stockflow_test")
@@ -94,6 +95,8 @@ def test_cors_origins_normalize_and_remove_duplicates(monkeypatch):
         "https://stockflow.example.com/dashboard",
         "ftp://stockflow.example.com",
         "not-a-valid-origin",
+        "https://stockflow.example.com:abc",
+        "https://stockflow.example.com:65536",
     ],
 )
 def test_cors_rejects_invalid_origins(monkeypatch, origin):
@@ -244,3 +247,96 @@ def test_settings_default_login_rate_limits(monkeypatch):
     assert settings.login_rate_limit_window_seconds == 900
     assert settings.login_rate_limit_ip_username_max_attempts == 10
     assert settings.login_rate_limit_ip_max_attempts == 60
+
+
+def test_settings_default_to_development(monkeypatch):
+    set_valid_database_environment(monkeypatch)
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("CORS_ORIGINS", raising=False)
+
+    settings = Settings.from_environment()
+
+    assert settings.app_env == "development"
+    assert settings.api_docs_enabled is True
+    assert settings.cors_origins == (
+        "http://localhost:4200",
+        "http://127.0.0.1:4200",
+    )
+
+
+@pytest.mark.parametrize("environment", ["staging", "testing", ""])
+def test_settings_reject_invalid_environment(monkeypatch, environment):
+    set_valid_database_environment(monkeypatch)
+    monkeypatch.setenv("APP_ENV", environment)
+
+    with pytest.raises(RuntimeError, match="APP_ENV"):
+        Settings.from_environment()
+
+
+def test_production_requires_explicit_cors_origins(monkeypatch):
+    set_valid_database_environment(monkeypatch)
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("CORS_ORIGINS", raising=False)
+
+    with pytest.raises(RuntimeError, match="explicitly configured"):
+        Settings.from_environment()
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://stockflow.example.com",
+        "http://localhost:4200",
+    ],
+)
+def test_production_rejects_http_cors_origins(monkeypatch, origin):
+    set_valid_database_environment(monkeypatch)
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("CORS_ORIGINS", origin)
+
+    with pytest.raises(RuntimeError, match="must use HTTPS"):
+        Settings.from_environment()
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://localhost:4200",
+        "https://127.0.0.1:4200",
+        "https://sub.localhost:4200",
+        "https://[::1]:4200",
+    ],
+)
+def test_production_rejects_loopback_cors_origins(monkeypatch, origin):
+    set_valid_database_environment(monkeypatch)
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("CORS_ORIGINS", origin)
+
+    with pytest.raises(RuntimeError, match="localhost or loopback"):
+        Settings.from_environment()
+
+
+def test_production_accepts_https_frontend_origin(monkeypatch):
+    set_valid_database_environment(monkeypatch)
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv(
+        "CORS_ORIGINS",
+        "https://stockflow.example.com",
+    )
+
+    settings = Settings.from_environment()
+
+    assert settings.app_env == "production"
+    assert settings.cors_origins == (
+        "https://stockflow.example.com",
+    )
+    assert settings.api_docs_enabled is False
+
+
+def test_production_rejects_empty_cors_list(monkeypatch):
+    set_valid_database_environment(monkeypatch)
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("CORS_ORIGINS", ", , ")
+
+    with pytest.raises(RuntimeError, match="at least one valid"):
+        Settings.from_environment()

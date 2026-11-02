@@ -1,6 +1,7 @@
 
 from dataclasses import dataclass
 import os
+import ipaddress
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -21,6 +22,17 @@ DEFAULT_CORS_ORIGINS = (
 )
 
 DEFAULT_EXPIRY_WORKER_API_URL = "http://127.0.0.1:8000"
+
+
+def get_app_environment() -> str:
+    environment = os.getenv("APP_ENV", "development").strip().lower()
+
+    if environment not in {"development", "production"}:
+        raise RuntimeError(
+            "APP_ENV must be either 'development' or 'production'."
+        )
+
+    return environment
 
 
 def get_required_setting(name: str) -> str:
@@ -87,11 +99,26 @@ def get_expiry_worker_api_url() -> str:
     return raw_url
 
 
-def get_cors_origins() -> tuple[str, ...]:
-    raw_origins = os.getenv(
-        "CORS_ORIGINS",
-        ",".join(DEFAULT_CORS_ORIGINS),
-    )
+def get_cors_origins(
+    app_environment: str | None = None,
+) -> tuple[str, ...]:
+    environment = app_environment or get_app_environment()
+
+    configured_origins = os.getenv("CORS_ORIGINS")
+
+    if environment == "production":
+        if not configured_origins or not configured_origins.strip():
+            raise RuntimeError(
+                "CORS_ORIGINS must be explicitly configured in production."
+            )
+
+        raw_origins = configured_origins
+    else:
+        raw_origins = (
+            configured_origins
+            if configured_origins is not None
+            else ",".join(DEFAULT_CORS_ORIGINS)
+        )
 
     origins = []
 
@@ -102,6 +129,20 @@ def get_cors_origins() -> tuple[str, ...]:
             continue
 
         parsed = urlsplit(origin)
+
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Invalid CORS origin: {origin}. "
+                "Provide a valid port between 1 and 65535."
+            ) from exc
+
+        if port is not None and not 1 <= port <= 65535:
+            raise RuntimeError(
+                f"Invalid CORS origin: {origin}. "
+                "Port must be between 1 and 65535."
+            )
 
         if (
             parsed.scheme not in ("http", "https")
@@ -118,14 +159,45 @@ def get_cors_origins() -> tuple[str, ...]:
                 "without a path."
             )
 
+        if environment == "production":
+            if parsed.scheme != "https":
+                raise RuntimeError(
+                    "Production CORS origins must use HTTPS."
+                )
+
+            hostname = parsed.hostname or ""
+            is_loopback = (
+                hostname.lower() == "localhost"
+                or hostname.lower().endswith(".localhost")
+            )
+
+            try:
+                is_loopback = (
+                    is_loopback or ipaddress.ip_address(hostname).is_loopback
+                )
+            except ValueError:
+                pass
+
+            if is_loopback:
+                raise RuntimeError(
+                    "Production CORS origins cannot use localhost "
+                    "or loopback addresses."
+                )
+
         if origin not in origins:
             origins.append(origin)
+
+    if environment == "production" and not origins:
+        raise RuntimeError(
+            "CORS_ORIGINS must contain at least one valid production origin."
+        )
 
     return tuple(origins)
 
 
 @dataclass(frozen=True)
 class Settings:
+    app_env: str
     db_host: str
     db_port: int
     db_name: str
@@ -147,8 +219,13 @@ class Settings:
     expiry_worker_request_timeout_seconds: int
     expiry_worker_max_backoff_seconds: int
 
+    @property
+    def api_docs_enabled(self) -> bool:
+        return self.app_env == "development"
+
     @classmethod
     def from_environment(cls) -> "Settings":
+        app_env = get_app_environment()
         # PostgreSQL configuration.
         try:
             db_port = int(get_required_setting("DB_PORT"))
@@ -246,12 +323,13 @@ class Settings:
             )
 
         return cls(
+            app_env=app_env,
             db_host=get_required_setting("DB_HOST"),
             db_port=db_port,
             db_name=get_required_setting("DB_NAME"),
             db_user=get_required_setting("DB_USER"),
             db_password=get_required_setting("DB_PASSWORD"),
-            cors_origins=get_cors_origins(),
+            cors_origins=get_cors_origins(app_env),
 
             jwt_secret_key=jwt_secret,
             worker_api_token=worker_token,
