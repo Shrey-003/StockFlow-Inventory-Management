@@ -38,6 +38,7 @@ COPY --chown=10001:10001 \
     dependencies.py \
     expiry_worker.py \
     worker_config.py \
+    login_rate_limiter.py \
     models.py \
     schemas.py \
     security.py \
