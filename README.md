@@ -103,8 +103,8 @@ Install the following:
 ### 2. Clone the Repository
 
 ```powershell
-git clone <repository-url>
-Set-Location StockFlow
+git clone https://github.com/Shrey-003/StockFlow-Inventory-Management.git
+Set-Location StockFlow-Inventory-Management
 ```
 
 ### 3. Create PostgreSQL Databases
