@@ -1,55 +1,74 @@
-
 import pytest
 
-from config import Settings
+from worker_config import WorkerSettings
+
+
+VALID_TOKEN = "test-worker-token-that-is-long-enough-0123456789"
 
 
 def set_valid_environment(monkeypatch):
-    monkeypatch.setenv("DB_HOST", "127.0.0.1")
-    monkeypatch.setenv("DB_PORT", "5432")
-    monkeypatch.setenv("DB_NAME", "stockflow_test")
-    monkeypatch.setenv("DB_USER", "test_user")
-    monkeypatch.setenv("DB_PASSWORD", "test_password")
-
-    monkeypatch.setenv(
-        "JWT_SECRET_KEY",
-        "test-jwt-secret-key-that-is-long-enough-0123456789",
-    )
-    monkeypatch.setenv(
-        "WORKER_API_TOKEN",
-        "test-worker-token-that-is-long-enough-0123456789",
-    )
-    monkeypatch.setenv(
-        "LOGIN_RATE_LIMIT_SECRET",
-        "test-login-rate-limit-secret-that-is-long-enough-012345",
-    )
+    monkeypatch.setenv("WORKER_API_TOKEN", VALID_TOKEN)
 
 
-def test_expiry_worker_default_configuration(monkeypatch):
+def test_worker_configuration_needs_no_database_or_api_secrets(monkeypatch):
     set_valid_environment(monkeypatch)
 
-    worker_settings = [
-        "EXPIRY_WORKER_API_URL",
-        "EXPIRY_WORKER_INTERVAL_SECONDS",
-        "EXPIRY_WORKER_REQUEST_TIMEOUT_SECONDS",
-        "EXPIRY_WORKER_MAX_BACKOFF_SECONDS",
-    ]
+    for name in (
+        "DB_HOST",
+        "DB_PORT",
+        "DB_NAME",
+        "DB_USER",
+        "DB_PASSWORD",
+        "JWT_SECRET_KEY",
+        "LOGIN_RATE_LIMIT_SECRET",
+        "CORS_ORIGINS",
+        "APP_ENV",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
-    for setting in worker_settings:
-        monkeypatch.delenv(setting, raising=False)
+    settings = WorkerSettings.from_environment()
 
-    settings = Settings.from_environment()
-
-    assert (
-        settings.expiry_worker_api_url
-        == "http://127.0.0.1:8000"
-    )
+    assert settings.worker_api_token == VALID_TOKEN
+    assert settings.expiry_worker_api_url == "http://127.0.0.1:8000"
     assert settings.expiry_worker_interval_seconds == 30
     assert settings.expiry_worker_request_timeout_seconds == 10
     assert settings.expiry_worker_max_backoff_seconds == 300
 
 
-def test_expiry_worker_loads_custom_configuration(monkeypatch):
+def test_worker_rejects_missing_token(monkeypatch):
+    monkeypatch.delenv("WORKER_API_TOKEN", raising=False)
+
+    with pytest.raises(RuntimeError, match="WORKER_API_TOKEN"):
+        WorkerSettings.from_environment()
+
+
+def test_worker_rejects_short_token(monkeypatch):
+    monkeypatch.setenv("WORKER_API_TOKEN", "too-short")
+
+    with pytest.raises(RuntimeError, match="32 characters"):
+        WorkerSettings.from_environment()
+
+
+def test_worker_default_configuration(monkeypatch):
+    set_valid_environment(monkeypatch)
+
+    for name in (
+        "EXPIRY_WORKER_API_URL",
+        "EXPIRY_WORKER_INTERVAL_SECONDS",
+        "EXPIRY_WORKER_REQUEST_TIMEOUT_SECONDS",
+        "EXPIRY_WORKER_MAX_BACKOFF_SECONDS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = WorkerSettings.from_environment()
+
+    assert settings.expiry_worker_api_url == "http://127.0.0.1:8000"
+    assert settings.expiry_worker_interval_seconds == 30
+    assert settings.expiry_worker_request_timeout_seconds == 10
+    assert settings.expiry_worker_max_backoff_seconds == 300
+
+
+def test_worker_custom_configuration(monkeypatch):
     set_valid_environment(monkeypatch)
 
     monkeypatch.setenv(
@@ -57,16 +76,13 @@ def test_expiry_worker_loads_custom_configuration(monkeypatch):
         "https://stockflow-internal.example.com:8443/",
     )
     monkeypatch.setenv("EXPIRY_WORKER_INTERVAL_SECONDS", "60")
-    monkeypatch.setenv(
-        "EXPIRY_WORKER_REQUEST_TIMEOUT_SECONDS", "15"
-    )
+    monkeypatch.setenv("EXPIRY_WORKER_REQUEST_TIMEOUT_SECONDS", "15")
     monkeypatch.setenv("EXPIRY_WORKER_MAX_BACKOFF_SECONDS", "600")
 
-    settings = Settings.from_environment()
+    settings = WorkerSettings.from_environment()
 
-    assert (
-        settings.expiry_worker_api_url
-        == "https://stockflow-internal.example.com:8443"
+    assert settings.expiry_worker_api_url == (
+        "https://stockflow-internal.example.com:8443"
     )
     assert settings.expiry_worker_interval_seconds == 60
     assert settings.expiry_worker_request_timeout_seconds == 15
@@ -85,57 +101,34 @@ def test_expiry_worker_loads_custom_configuration(monkeypatch):
         "http://localhost:99999",
     ],
 )
-def test_expiry_worker_rejects_invalid_api_urls(
-    monkeypatch,
-    url,
-):
+def test_worker_rejects_invalid_api_urls(monkeypatch, url):
     set_valid_environment(monkeypatch)
     monkeypatch.setenv("EXPIRY_WORKER_API_URL", url)
 
-    with pytest.raises(
-        RuntimeError,
-        match="EXPIRY_WORKER_API_URL",
-    ):
-        Settings.from_environment()
+    with pytest.raises(RuntimeError, match="EXPIRY_WORKER_API_URL"):
+        WorkerSettings.from_environment()
 
 
 @pytest.mark.parametrize(
     "interval",
-    [
-        "not-a-number",
-        "4",
-        "3601",
-    ],
+    ["not-a-number", "4", "3601"],
 )
-def test_expiry_worker_rejects_invalid_intervals(
-    monkeypatch,
-    interval,
-):
+def test_worker_rejects_invalid_intervals(monkeypatch, interval):
     set_valid_environment(monkeypatch)
-    monkeypatch.setenv(
-        "EXPIRY_WORKER_INTERVAL_SECONDS",
-        interval,
-    )
+    monkeypatch.setenv("EXPIRY_WORKER_INTERVAL_SECONDS", interval)
 
     with pytest.raises(
         RuntimeError,
         match="EXPIRY_WORKER_INTERVAL_SECONDS",
     ):
-        Settings.from_environment()
+        WorkerSettings.from_environment()
 
 
 @pytest.mark.parametrize(
     "timeout",
-    [
-        "not-a-number",
-        "0",
-        "121",
-    ],
+    ["not-a-number", "0", "121"],
 )
-def test_expiry_worker_rejects_invalid_request_timeouts(
-    monkeypatch,
-    timeout,
-):
+def test_worker_rejects_invalid_timeouts(monkeypatch, timeout):
     set_valid_environment(monkeypatch)
     monkeypatch.setenv(
         "EXPIRY_WORKER_REQUEST_TIMEOUT_SECONDS",
@@ -146,21 +139,14 @@ def test_expiry_worker_rejects_invalid_request_timeouts(
         RuntimeError,
         match="EXPIRY_WORKER_REQUEST_TIMEOUT_SECONDS",
     ):
-        Settings.from_environment()
+        WorkerSettings.from_environment()
 
 
 @pytest.mark.parametrize(
     "backoff",
-    [
-        "not-a-number",
-        "29",
-        "3601",
-    ],
+    ["not-a-number", "29", "3601"],
 )
-def test_expiry_worker_rejects_invalid_maximum_backoff(
-    monkeypatch,
-    backoff,
-):
+def test_worker_rejects_invalid_backoff(monkeypatch, backoff):
     set_valid_environment(monkeypatch)
     monkeypatch.setenv(
         "EXPIRY_WORKER_MAX_BACKOFF_SECONDS",
@@ -171,25 +157,16 @@ def test_expiry_worker_rejects_invalid_maximum_backoff(
         RuntimeError,
         match="EXPIRY_WORKER_MAX_BACKOFF_SECONDS",
     ):
-        Settings.from_environment()
+        WorkerSettings.from_environment()
 
 
-def test_expiry_worker_backoff_must_cover_polling_interval(
-    monkeypatch,
-):
+def test_worker_backoff_must_cover_interval(monkeypatch):
     set_valid_environment(monkeypatch)
-
-    monkeypatch.setenv(
-        "EXPIRY_WORKER_INTERVAL_SECONDS",
-        "60",
-    )
-    monkeypatch.setenv(
-        "EXPIRY_WORKER_MAX_BACKOFF_SECONDS",
-        "59",
-    )
+    monkeypatch.setenv("EXPIRY_WORKER_INTERVAL_SECONDS", "60")
+    monkeypatch.setenv("EXPIRY_WORKER_MAX_BACKOFF_SECONDS", "59")
 
     with pytest.raises(
         RuntimeError,
         match="EXPIRY_WORKER_MAX_BACKOFF_SECONDS",
     ):
-        Settings.from_environment()
+        WorkerSettings.from_environment()

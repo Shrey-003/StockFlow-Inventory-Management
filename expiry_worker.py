@@ -7,16 +7,18 @@ from threading import Event
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from config import settings
+from worker_config import worker_settings
 
 
 API_URL = (
-    f"{settings.expiry_worker_api_url}/reservations/expire-due"
+    f"{worker_settings.expiry_worker_api_url}/reservations/expire-due"
 )
 
-INTERVAL_SECONDS = settings.expiry_worker_interval_seconds
-REQUEST_TIMEOUT_SECONDS = settings.expiry_worker_request_timeout_seconds
-MAX_BACKOFF_SECONDS = settings.expiry_worker_max_backoff_seconds
+INTERVAL_SECONDS = worker_settings.expiry_worker_interval_seconds
+REQUEST_TIMEOUT_SECONDS = (
+    worker_settings.expiry_worker_request_timeout_seconds
+)
+MAX_BACKOFF_SECONDS = worker_settings.expiry_worker_max_backoff_seconds
 
 MAX_RESPONSE_BYTES = 1024 * 1024
 
@@ -47,7 +49,7 @@ def process_expired_reservations() -> int:
         API_URL,
         method="POST",
         headers={
-            "X-Worker-Token": settings.worker_api_token,
+            "X-Worker-Token": worker_settings.worker_api_token,
             "Accept": "application/json",
         },
     )

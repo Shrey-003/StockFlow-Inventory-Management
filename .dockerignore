@@ -1,0 +1,55 @@
+
+# Git repository
+.git/
+.gitignore
+
+# Python virtual environments
+.venv/
+venv/
+**/.venv/
+**/venv/
+
+# Python cache files
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+**/.pytest_cache/
+
+# Test and coverage output
+.coverage
+htmlcov/
+coverage/
+
+# Environment files and secrets
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Frontend dependencies and generated files
+frontend/node_modules/
+frontend/.angular/
+frontend/dist/
+frontend/coverage/
+node_modules/
+
+# Development-only files
+.vscode/
+.idea/
+requirements-dev.txt
+tests/
+scripts/
+test_*.py
+
+# Database backups and temporary credentials
+*.dump
+*.backup
+*.sha256
+StockFlowBackups/
+backup-credential.xml
+
+# Logs and temporary files
+*.log
+*.tmp
+*.partial

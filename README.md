@@ -316,6 +316,184 @@ The production build is generated in:
 
 `frontend/dist/frontend`
 
+
+## Docker Deployment
+
+StockFlow supports a Docker Compose deployment using PostgreSQL, FastAPI, an Angular frontend served by Nginx, and a background reservation expiry worker.
+
+### Prerequisites
+
+- Docker Desktop with the Linux container engine enabled.
+- Docker Compose.
+- Windows PowerShell for the commands below.
+- A configured `.env.docker` file containing unique, securely generated secrets.
+
+$dockerExe = "C:\Program Files\Docker\Docker\resources\bin\docker.exe"
+
+function docker {
+    & $dockerExe @args
+}
+
+### Container Architecture
+
+| Service | Responsibility |
+|---|---|
+| `frontend` | Angular production build served through Nginx |
+| `api` | FastAPI backend |
+| `db` | PostgreSQL 18 |
+| `migrate` | One-time Alembic database migration |
+| `worker` | Background reservation expiry processing |
+
+The deployment uses separate Docker networks for frontend traffic, database access, and worker communication.
+
+PostgreSQL data is persisted in the `stockflow_postgres_data` Docker volume.
+
+### Environment Configuration
+
+Create `.env.docker` in the project root.
+
+Required configuration includes:
+
+- `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`
+- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`
+- `APP_DB_PASSWORD`, `MIGRATOR_DB_PASSWORD`
+- `JWT_SECRET_KEY`, `WORKER_API_TOKEN`
+- `LOGIN_RATE_LIMIT_SECRET`
+- `CORS_ORIGINS`
+- Reservation expiry worker settings
+
+Generate independent secrets of at least 32 characters. `DB_PASSWORD` must match `APP_DB_PASSWORD`.
+
+Use the actual HTTPS frontend origin in `CORS_ORIGINS` before public deployment.
+
+Never commit `.env.docker` or share its contents.
+
+### Build and Start
+
+From the StockFlow project root:
+
+```powershell
+docker compose --env-file .env.docker config --quiet
+
+docker compose --env-file .env.docker build api migrate worker frontend
+
+docker compose --env-file .env.docker up -d db
+```
+
+Wait for PostgreSQL to become healthy.
+
+For a fresh database, the initialization script creates the dedicated migration and application accounts.
+
+For an existing database, restore a verified PostgreSQL backup into the empty Docker database before starting the application services.
+
+Start the remaining services:
+
+```powershell
+docker compose --env-file .env.docker up -d api worker frontend
+```
+
+Compose runs the required Alembic migration service before starting the API.
+
+Check service status:
+
+```powershell
+docker compose --env-file .env.docker ps
+```
+
+### Access the Application
+
+Open:
+
+```text
+http://localhost:8081
+```
+
+The frontend is served through Nginx, which forwards `/api` requests to FastAPI.
+
+The API is not directly published to the Windows host.
+
+### Create the Initial Administrator
+
+For a fresh database without restored user accounts:
+
+```powershell
+docker compose --env-file .env.docker exec api python create_admin.py
+```
+
+For a restored database, existing user accounts are preserved.
+
+### View Logs
+
+```powershell
+docker compose --env-file .env.docker logs --tail 50 api worker frontend db
+```
+
+Follow live logs:
+
+```powershell
+docker compose --env-file .env.docker logs -f api worker
+```
+
+### Stop and Restart
+
+Stop the application:
+
+```powershell
+docker compose --env-file .env.docker down
+```
+
+Restart:
+
+```powershell
+docker compose --env-file .env.docker up -d
+```
+
+The named PostgreSQL volume is preserved when using `down`.
+
+**Do not use `docker compose down -v` unless intentionally deleting the database volume.**
+
+### Database Backup and Restore
+
+Create PostgreSQL custom-format backups using `pg_dump` inside the database container. Copy the generated archive to a secure host directory using `docker cp`.
+
+Restore into a newly initialized, empty database using:
+
+```powershell
+docker compose --env-file .env.docker exec db `
+    pg_restore `
+    --username stockflow_migrator `
+    --dbname stockflow `
+    --no-owner `
+    --no-acl `
+    --exit-on-error `
+    /tmp/stockflow_restore.dump
+```
+
+Perform database backups regularly and verify both archive integrity and restoration procedures.
+
+Do not overwrite an existing database without first taking a verified backup.
+
+### Troubleshooting
+
+Check service status:
+
+```powershell
+docker compose --env-file .env.docker ps -a
+```
+
+Inspect a service:
+
+```powershell
+docker compose --env-file .env.docker logs --tail 100 api
+```
+
+Validate Compose configuration:
+
+```powershell
+docker compose --env-file .env.docker config --quiet
+```
+
+
 ## Authentication and API Permissions
 
 ### Authentication Endpoints
@@ -440,42 +618,49 @@ This manual demonstration requires product ID 6 to be the dedicated concurrency 
 
 It tests concurrent reservations and verifies inventory restoration.
 
+
 ## Production Readiness
 
-StockFlow is currently a development-stage project.
+StockFlow includes a locally verified Docker deployment and several production-oriented security controls. Public production deployment still requires additional hardening.
 
 ### Implemented
 
 - Username and password authentication.
 - Argon2 password hashing.
-- JWT bearer-token validation and expiration.
+- JWT bearer-token validation, expiration, and revocation.
 - Admin and staff role-based access control.
 - Protected product and reservation operations.
 - Reservation ownership enforcement.
-- Dedicated worker authentication.
-- Environment-based authentication secret configuration.
-- Alembic migrations for users and reservation ownership.
-- Angular login and logout functionality.
-- Authenticated HTTP requests through an Angular interceptor.
-- Automated backend authentication and authorization tests.
+- Dedicated worker authentication and configuration isolation.
+- PostgreSQL login rate limiting and brute-force protection.
+- Alembic database migration management.
+- Database administration, migration, and application accounts with separated privileges.
+- Persistent PostgreSQL storage.
+- Nginx reverse proxy and security response headers.
+- Public blocking of the protected reservation expiry endpoint.
+- Angular login, logout, and authenticated HTTP interceptor.
+- Automated backend test suite: 164 tests.
+- Automated Angular frontend test suite: 45 tests.
+- Docker Compose deployment with PostgreSQL, FastAPI, Angular/Nginx, migrations, and expiry worker.
+- Verified restoration of a PostgreSQL backup into the Docker database.
+- SHA-256 backup integrity verification.
 
-### Remaining Before Production Deployment
+### Remaining Before Public Production Deployment
 
-- HTTPS/TLS and production reverse-proxy configuration.
-- Production secret management and secret rotation.
-- Login rate limiting and brute-force protection.
+- HTTPS/TLS certificates and public reverse-proxy configuration.
+- Production secret management, rotation, and access auditing.
 - Stronger frontend session protection against XSS.
 - Password reset and account-management workflows.
 - Structured logging, monitoring, alerting, and audit trails.
-- Automated Angular frontend and end-to-end tests.
-- Production deployment configuration and process supervision.
-- Docker-based deployment.
+- Browser-based end-to-end testing.
 - Continuous integration and continuous delivery.
-- Verified backup, restore, and disaster-recovery procedures.
-- Database least-privilege configuration.
+- Scheduled containerized database backups and tested disaster recovery.
+- Container image version pinning, vulnerability scanning, and dependency update procedures.
+- Final public deployment security review.
 - A suitable project license.
 
-Do not expose the current development configuration publicly as a production service.
+Do not expose the local Docker deployment publicly without completing the remaining production security controls.
+
 
 ## License
 
